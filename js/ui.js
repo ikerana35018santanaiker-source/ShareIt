@@ -218,36 +218,149 @@ const UI = {
 
     // ========== OPERACIONES CON ARCHIVOS ==========
     async handleFileUpload(files) {
-        if (!files || files.length === 0) return;
+    if (!files || files.length === 0) return;
+    
+    const user = this.currentUser;
+    if (!user) return;
+    
+    const profile = await Database.getUserProfile(user.uid);
+    if (profile?.isAnonymous) {
+        this.showNotification('Los usuarios anónimos no pueden subir archivos', 'error');
+        return;
+    }
+    
+    // Mostrar panel de subidas
+    this.showUploadPanel();
+    
+    for (const file of files) {
+        const uploadId = Utils.generateId();
+        const uploadItem = this.createUploadItem(uploadId, file);
+        document.getElementById('upload-list').appendChild(uploadItem);
         
-        const user = this.currentUser;
-        if (!user) return;
-        
-        // Verificar si es anónimo
-        const profile = await Database.getUserProfile(user.uid);
-        if (profile?.isAnonymous) {
-            this.showNotification('Los usuarios anónimos no pueden subir archivos', 'error');
-            return;
+        try {
+            const result = await StorageManager.uploadFile(user.uid, file, (progress) => {
+                this.updateUploadProgress(uploadId, progress, file);
+            });
+            
+            this.completeUploadItem(uploadId, result);
+            this.showNotification(`${file.name} subido correctamente`, 'success');
+        } catch (error) {
+            this.failUploadItem(uploadId, error.message);
+            this.showNotification(`Error: ${error.message}`, 'error');
         }
+    }
+    
+    // Recargar vista
+    this.navigateTo(this.currentView, this.currentFolder);
+    await this.loadUserProfile();
+},
+
+createUploadItem(uploadId, file) {
+    const item = document.createElement('div');
+    item.className = 'upload-item';
+    item.id = `upload-${uploadId}`;
+    item.innerHTML = `
+        <div class="upload-item-icon">
+            <i class="${Utils.getFileIcon(file.name, file.type)}" style="color: ${Utils.getFileColor(file.name, file.type)};"></i>
+        </div>
+        <div class="upload-item-info">
+            <div class="upload-item-name">${file.name}</div>
+            <div class="upload-item-status">Subiendo... 0%</div>
+        </div>
+        <div class="upload-item-progress">
+            <svg class="progress-ring" width="32" height="32">
+                <circle class="progress-ring-circle-bg" cx="16" cy="16" r="14"></circle>
+                <circle class="progress-ring-circle" cx="16" cy="16" r="14" 
+                    stroke-dasharray="87.96" stroke-dashoffset="87.96"></circle>
+            </svg>
+        </div>
+    `;
+    return item;
+},
+
+updateUploadProgress(uploadId, progress, file) {
+    const item = document.getElementById(`upload-${uploadId}`);
+    if (!item) return;
+    
+    const circle = item.querySelector('.progress-ring-circle');
+    const status = item.querySelector('.upload-item-status');
+    const circumference = 87.96;
+    const offset = circumference - (progress / 100) * circumference;
+    
+    circle.style.strokeDashoffset = offset;
+    
+    // Calcular tiempo restante estimado
+    const elapsed = Date.now() - (item._startTime || Date.now());
+    item._startTime = item._startTime || Date.now();
+    
+    if (progress > 0 && progress < 100) {
+        const totalTime = (elapsed / progress) * 100;
+        const remaining = totalTime - elapsed;
+        const minutes = Math.ceil(remaining / 60000);
         
-        for (const file of files) {
-            try {
-                this.showNotification(`Subiendo ${file.name}...`, 'success');
-                
-                await StorageManager.uploadFile(user.uid, file, (progress) => {
-                    console.log(`Progreso ${file.name}: ${progress}%`);
-                });
-                
-                this.showNotification(`${file.name} subido correctamente`, 'success');
-            } catch (error) {
-                this.showNotification(`Error al subir ${file.name}: ${error.message}`, 'error');
-            }
+        if (minutes > 0) {
+            status.textContent = `Subiendo... ${progress}% · Queda${minutes > 1 ? 'n' : ''} ${minutes} minuto${minutes > 1 ? 's' : ''}`;
+        } else {
+            status.textContent = `Subiendo... ${progress}% · Casi listo`;
         }
-        
-        // Recargar vista actual
-        this.navigateTo(this.currentView, this.currentFolder);
-        await this.loadUserProfile();
-    },
+    } else {
+        status.textContent = `Subiendo... ${progress}%`;
+    }
+    
+    if (progress >= 100) {
+        circle.style.stroke = '#51CF66';
+    }
+},
+
+completeUploadItem(uploadId, fileData) {
+    const item = document.getElementById(`upload-${uploadId}`);
+    if (!item) return;
+    
+    const status = item.querySelector('.upload-item-status');
+    status.textContent = '✅ Completado';
+    status.style.color = '#51CF66';
+    
+    const circle = item.querySelector('.progress-ring-circle');
+    circle.style.strokeDashoffset = '0';
+    circle.style.stroke = '#51CF66';
+    
+    // Auto-ocultar después de 3 segundos
+    setTimeout(() => {
+        item.style.opacity = '0';
+        item.style.transform = 'translateX(100px)';
+        item.style.transition = 'all 0.3s ease';
+        setTimeout(() => item.remove(), 300);
+    }, 3000);
+},
+
+failUploadItem(uploadId, errorMsg) {
+    const item = document.getElementById(`upload-${uploadId}`);
+    if (!item) return;
+    
+    const status = item.querySelector('.upload-item-status');
+    status.textContent = `❌ ${errorMsg}`;
+    status.style.color = '#FF6B6B';
+    
+    const circle = item.querySelector('.progress-ring-circle');
+    circle.style.stroke = '#FF6B6B';
+},
+
+showUploadPanel() {
+    const panel = document.getElementById('upload-panel');
+    if (panel) panel.style.display = 'block';
+},
+
+toggleUploadPanel() {
+    const panel = document.getElementById('upload-panel');
+    const list = document.getElementById('upload-list');
+    if (panel && list) {
+        if (list.style.display === 'none') {
+            list.style.display = 'block';
+        } else {
+            list.style.display = 'none';
+        }
+    }
+}
 
     async createFolder() {
         const folderName = prompt('Nombre de la carpeta:');
