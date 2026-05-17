@@ -1,74 +1,80 @@
-// js/chat-ia.js - Chat con Inteligencia Artificial
+// js/chat-ia.js - Chat IA con Puter.js (SIN API KEY)
 
 const ChatIA = {
     conversationHistory: [],
     isProcessing: false,
     creditsUsed: 0,
+    maxCredits: 200,
 
-    // Inicializar chat
+    // Inicializar
     init() {
         this.loadCredits();
-        console.log('🤖 Chat IA inicializado');
+        console.log('🤖 Chat IA listo (Puter.js AI - sin API Key)');
     },
 
-    // Cargar créditos del usuario
+    // Cargar créditos del perfil
     async loadCredits() {
         const user = auth.currentUser;
-        if (!user) return;
+        if (!user || user.isAnonymous) {
+            this.maxCredits = 0;
+            return;
+        }
         
         const profile = await Database.getUserProfile(user.uid);
         if (profile) {
             this.creditsUsed = profile.iaCreditsUsed || 0;
-            this.updateCreditsDisplay();
+            const planId = profile.plan || 'PERSONAL_GRATUITO';
+            this.maxCredits = PLANS.getIACredits(planId);
+            if (this.maxCredits === Infinity) this.maxCredits = 999999;
         }
+        
+        this.updateCreditsDisplay();
     },
 
-    // Enviar mensaje
+    // Enviar mensaje al chat
     async sendMessage() {
         if (this.isProcessing) return;
         
         const input = document.getElementById('ia-input');
         const message = input?.value.trim();
-        
         if (!message) return;
         
         // Verificar créditos
         if (!this.hasCredits()) {
-            UI.showNotification('No tienes créditos IA disponibles. Mejora tu plan.', 'error');
+            UI.showNotification('Sin créditos IA. Mejora tu plan.', 'error');
             return;
         }
         
-        // Añadir mensaje del usuario al chat
+        // Mostrar mensaje del usuario
         this.addMessage('user', message);
         input.value = '';
+        input.style.height = 'auto';
         
         this.isProcessing = true;
         this.showTypingIndicator();
         
         try {
-            // Usar Puter.js para IA
             let response;
             
-            if (typeof puter !== 'undefined' && puter.ai) {
-                // Construir contexto con historial
-                const context = this.buildContext();
-                const fullPrompt = context + '\nUsuario: ' + message + '\nAsistente:';
-                
-                response = await puter.ai.chat(fullPrompt, {
-                    model: 'default',
-                    maxTokens: 500
+            // Usar Puter.js AI (NO necesita API Key)
+            if (typeof putter !== 'undefined' && puter.ai) {
+                response = await puter.ai.chat(message, {
+                    systemMessage: 'Eres ShareIt AI, un asistente amigable especializado en ayudar con archivos, organización y productividad. Respondes en español de forma clara y útil.',
+                    temperature: 0.7,
+                    maxTokens: 1000
                 });
             } else {
-                // Fallback si Puter IA no está disponible
-                response = await this.fallbackResponse(message);
+                // Fallback si Puter AI no está disponible
+                response = this.generateFallbackResponse(message);
             }
             
-            // Añadir respuesta al chat
-            const responseText = response.message || response.text || response;
-            this.addMessage('bot', responseText);
+            // Extraer texto de la respuesta
+            const responseText = typeof response === 'string' 
+                ? response 
+                : response?.message?.content || response?.message || response?.text || 'Lo siento, no pude procesar tu mensaje.';
             
-            // Descontar crédito
-            this.useCredit();
+            // Mostrar respuesta
+            this.addMessage('bot', responseText);
             
             // Guardar en historial
             this.conversationHistory.push(
@@ -76,158 +82,139 @@ const ChatIA = {
                 { role: 'assistant', content: responseText }
             );
             
+            // Limitar historial a 50 mensajes
+            if (this.conversationHistory.length > 50) {
+                this.conversationHistory = this.conversationHistory.slice(-50);
+            }
+            
+            // Consumir crédito
+            await this.useCredit();
+            
         } catch (error) {
-            console.error('❌ Error en chat IA:', error);
-            this.addMessage('bot', 'Lo siento, ocurrió un error. Intenta de nuevo más tarde.');
+            console.error('❌ Error en Chat IA:', error);
+            this.addMessage('bot', '❌ Ocurrió un error. Por favor, intenta de nuevo.');
         } finally {
             this.hideTypingIndicator();
             this.isProcessing = false;
         }
     },
 
-    // Construir contexto de conversación
-    buildContext() {
-        if (this.conversationHistory.length === 0) return '';
+    // Respuesta de respaldo si Puter AI no está disponible
+    generateFallbackResponse(message) {
+        const lowerMsg = message.toLowerCase();
         
-        const recentHistory = this.conversationHistory.slice(-6);
-        return recentHistory
-            .map(msg => `${msg.role === 'user' ? 'Usuario' : 'Asistente'}: ${msg.content}`)
-            .join('\n');
-    },
-
-    // Fallback si Puter IA no está disponible
-    async fallbackResponse(message) {
-        const responses = [
-            '¡Interesante pregunta! Estoy aquí para ayudarte con tus archivos y más.',
-            'Puedo ayudarte a organizar tus archivos, buscar información y mucho más.',
-            '¿Sabías que puedes compartir archivos con links personalizados en ShareIt?',
-            'Estoy aprendiendo constantemente para ofrecerte mejores respuestas.',
-            'Puedes preguntarme sobre tus archivos, o pedirme que te ayude con tareas.'
-        ];
+        if (lowerMsg.includes('hola') || lowerMsg.includes('buenos días')) {
+            return '¡Hola! 👋 Soy ShareIt AI. Puedo ayudarte con:\n\n📁 Organizar tus archivos\n🔍 Buscar documentos\n💡 Consejos de productividad\nℹ️ Información sobre tu cuenta\n\n¿En qué puedo ayudarte hoy?';
+        }
         
-        // Simular delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (lowerMsg.includes('archivo') || lowerMsg.includes('archivos')) {
+            return 'Puedo ayudarte con tus archivos. En ShareIt puedes:\n\n📤 Subir archivos (arrastra y suelta)\n📁 Crear carpetas para organizar\n🔗 Compartir con links\n⭐ Marcar favoritos\n🗑️ Mover a la papelera\n\n¿Necesitas ayuda con algo específico?';
+        }
         
-        return {
-            message: responses[Math.floor(Math.random() * responses.length)]
-        };
+        if (lowerMsg.includes('espacio') || lowerMsg.includes('almacenamiento')) {
+            return 'Tu espacio de almacenamiento depende de tu plan:\n\n🆓 Gratuito: 15 GB\n⭐ Plus: 125 GB\n👑 Pro: 350 GB\n\nPuedes ver tu espacio usado en la barra lateral. ¿Quieres saber más sobre los planes?';
+        }
+        
+        return 'Gracias por tu mensaje. Soy ShareIt AI y estoy aquí para ayudarte con:\n\n📁 Gestión de archivos\n🔗 Compartir documentos\n💾 Almacenamiento\nℹ️ Información de tu cuenta\n\n¿Podrías ser más específico sobre lo que necesitas?';
     },
 
     // Añadir mensaje al chat
     addMessage(type, content) {
-        const messagesContainer = document.getElementById('ia-messages');
-        if (!messagesContainer) return;
+        const container = document.getElementById('ia-messages');
+        if (!container) return;
         
-        // Eliminar mensaje de bienvenida si existe
-        const welcomeMsg = messagesContainer.querySelector('.ia-welcome');
-        if (welcomeMsg) welcomeMsg.remove();
+        // Eliminar mensaje de bienvenida
+        const welcome = container.querySelector('.ia-welcome');
+        if (welcome) welcome.remove();
         
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `ia-message ${type} animate__animated animate__fadeInUp`;
-        messageDiv.innerHTML = content.replace(/\n/g, '<br>');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `ia-message ${type} animate__animated animate__fadeInUp`;
         
-        messagesContainer.appendChild(messageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        // Convertir saltos de línea en <br>
+        const formattedContent = content
+            .replace(/\n/g, '<br>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`(.*?)`/g, '<code>$1</code>');
+        
+        msgDiv.innerHTML = formattedContent;
+        container.appendChild(msgDiv);
+        
+        // Scroll al final
+        container.scrollTop = container.scrollHeight;
     },
 
-    // Mostrar indicador de escritura
+    // Mostrar indicador de "escribiendo..."
     showTypingIndicator() {
-        const messagesContainer = document.getElementById('ia-messages');
-        if (!messagesContainer) return;
+        const container = document.getElementById('ia-messages');
+        if (!container) return;
         
-        const typingDiv = document.createElement('div');
-        typingDiv.className = 'ia-message bot typing-indicator';
-        typingDiv.id = 'typing-indicator';
-        typingDiv.innerHTML = '<span></span><span></span><span></span>';
-        
-        messagesContainer.appendChild(typingDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        const indicator = document.createElement('div');
+        indicator.className = 'ia-message bot typing-indicator';
+        indicator.id = 'typing-indicator';
+        indicator.innerHTML = `
+            <div class="typing-dots">
+                <span></span><span></span><span></span>
+            </div>
+        `;
+        container.appendChild(indicator);
+        container.scrollTop = container.scrollHeight;
     },
 
-    // Ocultar indicador de escritura
+    // Ocultar indicador
     hideTypingIndicator() {
         const indicator = document.getElementById('typing-indicator');
         if (indicator) indicator.remove();
     },
 
-    // Verificar créditos disponibles
+    // Verificar créditos
     hasCredits() {
         const user = auth.currentUser;
-        if (!user) return false;
-        
-        // Usuarios anónimos no tienen créditos
-        if (user.isAnonymous) return false;
-        
-        const plan = PLANS.PERSONAL.GRATUITO;
-        const maxCredits = plan.iaCredits || 200;
-        
-        return this.creditsUsed < maxCredits;
+        if (!user || user.isAnonymous) return false;
+        return this.creditsUsed < this.maxCredits;
     },
 
-    // Usar un crédito
+    // Consumir crédito
     async useCredit() {
         this.creditsUsed++;
         this.updateCreditsDisplay();
         
         const user = auth.currentUser;
         if (user && !user.isAnonymous) {
-            await Database.updateUserProfile(user.uid, { 
-                iaCreditsUsed: this.creditsUsed 
+            await Database.updateUserProfile(user.uid, {
+                iaCreditsUsed: this.creditsUsed
             });
         }
     },
 
-    // Actualizar display de créditos
+    // Actualizar display
     updateCreditsDisplay() {
         const badge = document.getElementById('ia-credits-badge');
         if (!badge) return;
         
-        const plan = PLANS.PERSONAL.GRATUITO;
-        const maxCredits = plan.iaCredits || 200;
-        const remaining = Math.max(0, maxCredits - this.creditsUsed);
+        const remaining = Math.max(0, this.maxCredits - this.creditsUsed);
         
-        badge.textContent = `${remaining} créditos`;
-        
-        if (remaining < 20) {
-            badge.style.color = '#FF6B6B';
+        if (this.maxCredits >= 999999) {
+            badge.textContent = '∞ créditos';
+            badge.style.color = '#00CECE';
+        } else {
+            badge.textContent = `${remaining} créditos`;
+            badge.style.color = remaining < 20 ? '#FF6B6B' : '#A29BFE';
         }
     },
 
-    // Limpiar historial
-    clearHistory() {
+    // Limpiar chat
+    clearChat() {
         this.conversationHistory = [];
-        const messagesContainer = document.getElementById('ia-messages');
-        if (messagesContainer) {
-            messagesContainer.innerHTML = `
+        const container = document.getElementById('ia-messages');
+        if (container) {
+            container.innerHTML = `
                 <div class="ia-welcome">
                     <i class="fa-solid fa-robot fa-2x mb-10" style="color: #6C5CE7;"></i>
-                    <p>¡Hola! Soy tu asistente IA. ¿En qué puedo ayudarte?</p>
+                    <p>¡Hola! Soy ShareIt AI. Pregúntame lo que necesites.</p>
                 </div>
             `;
         }
-    },
-
-    // Obtener sugerencias basadas en archivos
-    async getFileSuggestions() {
-        const user = auth.currentUser;
-        if (!user) return [];
-        
-        const files = await Database.getAllUserFiles(user.uid);
-        const activeFiles = files.filter(f => !f.inTrash);
-        
-        const suggestions = [];
-        
-        if (activeFiles.length > 10) {
-            suggestions.push('Tienes muchos archivos, ¿quieres que te ayude a organizarlos?');
-        }
-        
-        const largeFiles = activeFiles.filter(f => f.size > 100 * 1024 * 1024);
-        if (largeFiles.length > 0) {
-            suggestions.push(`Tienes ${largeFiles.length} archivos grandes. ¿Necesitas liberar espacio?`);
-        }
-        
-        return suggestions;
     }
 };
 
-console.log('🤖 Chat IA cargado');
+console.log('🤖 ChatIA cargado (Puter.js AI sin API Key)');
