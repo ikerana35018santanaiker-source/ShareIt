@@ -3,44 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ShareIt - Tu nube inteligente</title>
+    <title>ShareIt — Tu nube inteligente con IA</title>
+
+    <!-- Estilos externos: Animaciones -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-    <!-- Puter.js (necesitarás incluir su SDK aquí si lo usas) -->
-    <!-- <script src="https://js.puter.com/v2/puter.js"></script> -->
+
+    <!-- Puter.js SDK (v2) — Para almacenamiento grande y chat IA -->
+    <script src="https://js.puter.com/v2/puter.js"></script>
+
     <!-- Tus estilos -->
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    <link rel="stylesheet" href="css/auth.css">
 </head>
 <body>
-    <div id="auth-container" style="display: none;">
-        <!-- Aquí los formularios de login dinámicos -->
-        <h2>Iniciar Sesión en ShareIt</h2>
-        <button onclick="Auth.signInWithGoogle()">Google</button>
-        <!-- ... más botones ... -->
+    <!-- Contenedor de autenticación -->
+    <div id="auth-container" class="fullscreen-center" style="display: flex;">
+        <div class="auth-card glass animate__animated animate__fadeInUp">
+            <img src="assets/logo.svg" alt="ShareIt" class="logo" onerror="this.style.display='none'">
+            <h2>Bienvenido a <span class="gradient-text">ShareIt</span></h2>
+            <p class="subtitle">Almacena, comparte y usa IA</p>
+
+            <button class="btn btn-google" onclick="Auth.signInWithGoogle()">
+                🟦 Continuar con Google
+            </button>
+            <button class="btn btn-email" onclick="UI.showEmailForm()">
+                📧 Usar correo electrónico
+            </button>
+            <button class="btn btn-anonymous" onclick="Auth.signInAnonymously()">
+                👻 Acceder anónimamente (solo lectura)
+            </button>
+
+            <div id="email-auth-form" style="display: none;">
+                <input type="email" id="auth-email" placeholder="tu@correo.com" class="input-field">
+                <input type="password" id="auth-password" placeholder="Contraseña" class="input-field">
+                <button class="btn btn-primary" onclick="Auth.signInWithEmail()">Iniciar sesión</button>
+                <button class="btn btn-secondary" onclick="Auth.signUpWithEmail()">Crear cuenta</button>
+                <a href="#" onclick="Auth.sendPasswordResetEmail()">¿Olvidaste tu contraseña?</a>
+                <a href="#" onclick="Auth.sendSignInLinkToEmail()">Acceder con link mágico</a>
+            </div>
+        </div>
     </div>
 
+    <!-- Contenedor de la aplicación principal -->
     <div id="app-container" style="display: none;">
-        <aside id="sidebar">
-            <!-- Barra lateral renderizada por UI.renderSidebar() -->
-            <button onclick="UI.renderApp()">Mi Unidad</button>
-            <button onclick="UI.showTrash()">Papelera</button>
+        <!-- Barra lateral -->
+        <aside id="sidebar" class="glass">
+            <div class="user-info">
+                <img id="user-avatar" src="assets/default-avatar.png" alt="Avatar" class="avatar">
+                <span id="user-name">Usuario</span>
+            </div>
+            <nav>
+                <button class="nav-btn active" onclick="UI.navigateTo('root')">📁 Mi unidad</button>
+                <button class="nav-btn" onclick="UI.navigateTo('shared')">🔗 Compartidos conmigo</button>
+                <button class="nav-btn" onclick="UI.navigateTo('trash')">🗑️ Papelera</button>
+                <button class="nav-btn" onclick="UI.navigateTo('backups')">💾 Copias de seguridad</button>
+            </nav>
+            <div class="storage-indicator">
+                <p>Almacenamiento</p>
+                <progress id="storage-bar" value="0" max="100"></progress>
+                <small id="storage-text">0 GB / 15 GB</small>
+            </div>
         </aside>
-        <main id="file-list">
-            <!-- Lista de archivos renderizada por UI.renderFileList() -->
+
+        <!-- Zona principal -->
+        <main id="main-content">
+            <header id="main-header">
+                <h2 id="current-view-title">Mi unidad</h2>
+                <div class="header-actions">
+                    <button id="upload-btn" class="btn btn-upload" onclick="document.getElementById('file-input').click()">➕ Subir archivo</button>
+                    <button class="btn btn-new-folder" onclick="UI.createFolder()">📂 Nueva carpeta</button>
+                    <input type="file" id="file-input" style="display: none;" onchange="UI.handleFileUpload(this.files)">
+                </div>
+            </header>
+            <div id="file-list" class="file-grid">
+                <!-- Renderizado dinámico -->
+            </div>
         </main>
-        <button id="upload-btn" onclick="document.getElementById('file-input').click()">➕ Subir</button>
-        <input type="file" id="file-input" style="display: none;" onchange="UI.handleFileUpload(this.files)">
+
+        <!-- Panel de chat IA (oculto por defecto) -->
+        <div id="ia-panel" class="glass" style="display: none;">
+            <div class="ia-header">
+                <h3>🤖 ShareIt IA</h3>
+                <button onclick="UI.toggleIAPanel()">✖️</button>
+            </div>
+            <div id="ia-chat" class="ia-messages"></div>
+            <div class="ia-input-area">
+                <input type="text" id="ia-prompt" placeholder="Pregúntame algo..." class="input-field">
+                <button class="btn btn-send" onclick="UI.sendIAPrompt()">➤</button>
+            </div>
+            <small id="ia-credits">Créditos IA: 0</small>
+        </div>
+
+        <button id="toggle-ia-btn" class="fab" onclick="UI.toggleIAPanel()">💬</button>
     </div>
 
-    <!-- Carga de tus scripts en orden -->
+    <!-- Carga de scripts en orden -->
     <script src="js/utils.js"></script>
     <script src="js/plans.js"></script>
     <script src="js/firebase-config.js"></script>
     <script src="js/auth.js"></script>
+    <script src="js/database.js"></script>
     <script src="js/storage.js"></script>
+    <script src="js/share.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/app.js"></script>
 </body>
