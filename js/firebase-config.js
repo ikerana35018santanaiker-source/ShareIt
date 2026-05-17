@@ -1,5 +1,5 @@
 // js/firebase-config.js
-// Configuración estricta de ShareIt para Firebase
+// Configuración de Firebase para ShareIt
 const firebaseConfig = {
   apiKey: "AIzaSyDKurDI4iIcV_6LnzLkML0E3hM9hqWaMZg",
   authDomain: "shareit-c1222.firebaseapp.com",
@@ -13,6 +13,8 @@ const firebaseConfig = {
 // Inicializar Firebase
 firebase.initializeApp(firebaseConfig);
 
-// Referencias a servicios que usaremos
+// Referencias globales
 const auth = firebase.auth();
 const database = firebase.database();
+
+console.log('🔥 Firebase inicializado correctamente');
