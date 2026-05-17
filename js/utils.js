@@ -1,6 +1,5 @@
 // js/utils.js
 const Utils = {
-    // Formatear bytes a KB, MB, GB, etc.
     formatBytes(bytes, decimals = 2) {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -10,14 +9,27 @@ const Utils = {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
     },
 
-    // Generar un ID único para carpetas/archivos
     generateId() {
-        return 'sh_' + Math.random().toString(36).substr(2, 9);
+        return 'sh_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
     },
 
-    // Verificar si un archivo debe ir por Base64 o API (estrictamente 15MB)
     isBase64File(file) {
         const limitMB = 15;
         return file.size <= limitMB * 1024 * 1024;
+    },
+
+    // Obtener extensión del archivo
+    getFileExtension(filename) {
+        return filename.split('.').pop().toLowerCase();
+    },
+
+    // Icono según extensión
+    getFileIcon(filename) {
+        const ext = this.getFileExtension(filename);
+        const icons = {
+            pdf: '📕', doc: '📘', docx: '📘', xls: '📊', jpg: '🖼️', png: '🖼️',
+            mp4: '🎬', mp3: '🎵', zip: '📦', folder: '📁'
+        };
+        return icons[ext] || '📄';
     }
 };
