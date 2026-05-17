@@ -1,1 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>ShareIt - Tu nube inteligente</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <!-- Puter.js (necesitarás incluir su SDK aquí si lo usas) -->
+    <!-- <script src="https://js.puter.com/v2/puter.js"></script> -->
+    <!-- Tus estilos -->
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+</head>
+<body>
+    <div id="auth-container" style="display: none;">
+        <!-- Aquí los formularios de login dinámicos -->
+        <h2>Iniciar Sesión en ShareIt</h2>
+        <button onclick="Auth.signInWithGoogle()">Google</button>
+        <!-- ... más botones ... -->
+    </div>
 
+    <div id="app-container" style="display: none;">
+        <aside id="sidebar">
+            <!-- Barra lateral renderizada por UI.renderSidebar() -->
+            <button onclick="UI.renderApp()">Mi Unidad</button>
+            <button onclick="UI.showTrash()">Papelera</button>
+        </aside>
+        <main id="file-list">
+            <!-- Lista de archivos renderizada por UI.renderFileList() -->
+        </main>
+        <button id="upload-btn" onclick="document.getElementById('file-input').click()">➕ Subir</button>
+        <input type="file" id="file-input" style="display: none;" onchange="UI.handleFileUpload(this.files)">
+    </div>
+
+    <!-- Carga de tus scripts en orden -->
+    <script src="js/utils.js"></script>
+    <script src="js/plans.js"></script>
+    <script src="js/firebase-config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
