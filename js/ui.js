@@ -1,81 +1,123 @@
 // js/ui.js
 const UI = {
     currentUser: null,
-    currentFolder: 'root', // Para navegar entre carpetas
+    currentFolder: 'root',
+    currentView: 'root', // 'root', 'shared', 'trash', 'backups'
+    filesCache: [],
 
-    renderAuthForms() {
-        // Ocultar app, mostrar contenedor de auth
-        document.getElementById('app-container').style.display = 'none';
-        document.getElementById('auth-container').style.display = 'block';
-        // Aquí cargaría dinámicamente los formularios para Google, Email, Anónimo, Link Mágico...
-        console.log("Mostrando UI de autenticación");
-    },
-
-    async renderApp(user, userData) {
+    renderApp(user, userData) {
         this.currentUser = user;
         document.getElementById('auth-container').style.display = 'none';
-        document.getElementById('app-container').style.display = 'block';
+        const appContainer = document.getElementById('app-container');
+        appContainer.style.display = 'flex';
+        setTimeout(() => appContainer.classList.add('visible'), 10);
 
-        // Mostrar barra lateral (carpetas, papelera, compartidos)
-        this.renderSidebar(userData);
-
-        // Cargar y mostrar archivos de la carpeta actual
-        const files = await StorageManager.getUserFiles(user.uid);
-        this.renderFileList(files);
-
-        // Aplicar lógica de UI: si es anónimo, deshabilitar botón de subida
-        if (userData && userData.isAnonymous) {
-            document.getElementById('upload-btn').disabled = true;
-            document.getElementById('upload-btn').title = "Los usuarios anónimos no pueden subir archivos";
-        }
+        document.getElementById('user-name').textContent = user.email || user.displayName || 'Anónimo';
+        this.updateStorageIndicator(userData);
+        this.navigateTo('root');
+        StorageManager.initPuter();
     },
 
-    renderFileList(files) {
-        const fileListContainer = document.getElementById('file-list');
-        fileListContainer.innerHTML = ''; // Limpiar
+    async navigateTo(view) {
+        this.currentView = view;
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`[onclick="UI.navigateTo('${view}')"]`)?.classList.add('active');
 
-        // Filtrar archivos que no están en papelera y están en la carpeta actual
-        const activeFiles = files.filter(f => !f.inTrash && f.parentFolder === this.currentFolder);
+        const titles = { root: 'Mi unidad', shared: 'Compartidos conmigo', trash: 'Papelera', backups: 'Copias de seguridad' };
+        document.getElementById('current-view-title').textContent = titles[view];
 
-        activeFiles.forEach(file => {
-            const fileElement = document.createElement('div');
-            fileElement.className = 'file-item animate__animated animate__fadeIn'; // Animación suave
-            fileElement.innerHTML = `
-                <span class="file-icon">📄</span>
-                <span class="file-name">${file.name}</span>
-                <span class="file-size">${Utils.formatBytes(file.size)}</span>
-                <button onclick="UI.shareFile('${file.id}')">🔗 Compartir</button>
-                <button onclick="UI.deleteFile('${file.id}')">🗑️ Mover a Papelera</button>
+        const files = await Database.getAllUserFiles(this.currentUser.uid);
+        this.filesCache = files;
+        this.renderFileList(files, view);
+    },
+
+    renderFileList(files, view) {
+        const container = document.getElementById('file-list');
+        container.innerHTML = '';
+
+        let filtered = [];
+        if (view === 'root') filtered = files.filter(f => !f.inTrash && f.parentFolder === this.currentFolder);
+        else if (view === 'trash') filtered = files.filter(f => f.inTrash);
+        else if (view === 'shared') filtered = []; // Se llenará con consulta a shared_links
+
+        filtered.forEach(file => {
+            const card = document.createElement('div');
+            card.className = 'file-card animate__animated animate__fadeInUp';
+            card.innerHTML = `
+                <div class="file-icon">${file.type === 'folder' ? '📁' : Utils.getFileIcon(file.name)}</div>
+                <div class="file-name">${file.name}</div>
+                <div class="file-size">${file.size ? Utils.formatBytes(file.size) : ''}</div>
+                <div class="file-actions">
+                    <button onclick="UI.shareFile('${file.id}')">🔗</button>
+                    <button onclick="UI.moveToTrash('${file.id}')">🗑️</button>
+                </div>
             `;
-            fileListContainer.appendChild(fileElement);
+            card.addEventListener('click', () => {
+                if (file.type === 'folder') {
+                    this.currentFolder = file.id;
+                    this.navigateTo('root');
+                } else {
+                    this.previewFile(file);
+                }
+            });
+            container.appendChild(card);
         });
     },
 
-    renderSidebar(userData) {
-        // Renderizar secciones: Mi Unidad, Compartidos Conmigo, Papelera, etc.
-        console.log("Renderizando barra lateral con uso de almacenamiento...");
-        // Aquí se calcularía el espacio usado vs el límite del plan
-    },
-
-    // Funciones para papelera, compartir, etc.
-    async deleteFile(fileId) {
-        if (!confirm('¿Mover archivo a la papelera?')) return;
-        await database.ref(`files/${this.currentUser.uid}/${fileId}`).update({ inTrash: true });
-        this.renderApp(this.currentUser, null); // Recargar vista
-        alert('Archivo movido a la papelera.');
-    },
-
     async shareFile(fileId) {
-        // Lógica para generar un link único y aleatorio (no siempre el mismo)
-        const shareId = 'link_' + Utils.generateId();
-        const shareData = {
-            shareId: shareId,
-            fileId: fileId,
-            createdBy: this.currentUser.uid,
-            createdAt: firebase.database.ServerValue.TIMESTAMP
-        };
-        await database.ref(`shared_links/${shareId}`).set(shareData);
-        const shareableLink = `${window.location.origin}/?shared=${shareId}`;
-        prompt('📎 Link para compartir (copia y pega):', shareableLink);
+        const link = await ShareManager.createShareLink(this.currentUser.uid, fileId);
+        prompt('Link para compartir:', link);
+    },
+
+    async moveToTrash(fileId) {
+        await Database.moveToTrash(this.currentUser.uid, fileId);
+        this.navigateTo(this.currentView);
+    },
+
+    async previewFile(file) {
+        const url = await StorageManager.getFileUrl(file);
+        if (url) {
+            window.open(url, '_blank');
+        } else {
+            alert('No se pudo previsualizar el archivo.');
+        }
+    },
+
+    async handleFileUpload(files) {
+        if (!files.length) return;
+        const file = files[0];
+        try {
+            await StorageManager.uploadFile(this.currentUser.uid, file);
+            this.navigateTo(this.currentView);
+        } catch (e) {
+            alert('Error al subir: ' + e.message);
+        }
+    },
+
+    toggleIAPanel() {
+        const panel = document.getElementById('ia-panel');
+        panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+    },
+
+    async sendIAPrompt() {
+        const input = document.getElementById('ia-prompt');
+        const prompt = input.value.trim();
+        if (!prompt) return;
+        // Usar Puter.js para IA
+        try {
+            const response = await puter.ai.chat(prompt);
+            const chatContainer = document.getElementById('ia-chat');
+            chatContainer.innerHTML += `<div class="msg user">🧑 ${prompt}</div>`;
+            chatContainer.innerHTML += `<div class="msg ia">🤖 ${response.message || response}</div>`;
+            input.value = '';
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        } catch (e) {
+            alert('IA no disponible en este momento.');
+        }
+    },
+
+    updateStorageIndicator(userData) {
+        // Lógica de espacio según plan
+        document.getElementById('storage-text').textContent = '0 GB / 15 GB';
     }
 };
