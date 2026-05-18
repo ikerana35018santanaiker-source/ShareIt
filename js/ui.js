@@ -1,91 +1,101 @@
-// js/ui.js - Interfaz de usuario completa
+// js/ui.js - Interfaz de usuario COMPLETA de ShareIt
+// Versión: 2.0 - Con ajustes, preview, papelera funcional, notificaciones de subida
 
 const UI = {
+    // ========== ESTADO ==========
     currentUser: null,
     currentView: 'my-drive',
     currentFolder: null,
     selectedFiles: new Set(),
     filesCache: [],
     isSidebarOpen: true,
+    _currentPreviewFile: null,
+    _uploadStartTimes: {},
+    _activeUploads: 0,
 
     // ========== INICIALIZACIÓN ==========
     async renderApp(user) {
         this.currentUser = user;
         
-        // Ocultar pantalla de carga y auth
         document.getElementById('loading-screen').style.display = 'none';
         document.getElementById('auth-container').style.display = 'none';
         
-        // Mostrar app
         const appContainer = document.getElementById('app-container');
         appContainer.style.display = 'flex';
         setTimeout(() => appContainer.classList.add('visible'), 50);
         
-        // Cargar perfil
         await this.loadUserProfile();
-        
-        // Inicializar almacenamiento
         await StorageManager.initPuter();
         
-        // Inicializar chat IA
-        ChatIA.init();
+        if (typeof ChatIA !== 'undefined') {
+            ChatIA.init();
+        }
         
-        // Navegar a la vista inicial
         this.navigateTo('my-drive');
+        this.checkSharedLink();
         
-        // Verificar link compartido en URL
-        await this.checkSharedLink();
-        
-        console.log('✅ App renderizada correctamente');
+        console.log('✅ App renderizada para:', user.uid);
     },
 
-    // Cargar perfil de usuario
+    // ========== PERFIL ==========
     async loadUserProfile() {
         if (!this.currentUser) return;
         
-        const profile = await Database.getUserProfile(this.currentUser.uid);
-        if (!profile) return;
-        
-        // Actualizar UI con datos del perfil
-        document.getElementById('user-name').textContent = 
-            profile.displayName || this.currentUser.email?.split('@')[0] || 'Usuario';
-        
-        document.getElementById('user-plan').textContent = 
-            profile.plan === 'PERSONAL_GRATUITO' ? 'Plan Gratuito' : 'Plan Premium';
-        
-        // Avatar
-        const avatarUrl = profile.photoURL || 
-            `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.displayName || 'User')}&background=6C5CE7&color=fff&size=40`;
-        document.getElementById('user-avatar').src = avatarUrl;
-        
-        // Actualizar barra de almacenamiento
-        this.updateStorageBar(profile);
-        
-        // Deshabilitar subida para anónimos
-        if (profile.isAnonymous) {
+        try {
+            const profile = await Database.getUserProfile(this.currentUser.uid);
+            if (!profile) return;
+            
+            const nameEl = document.getElementById('user-name');
+            const planEl = document.getElementById('user-plan');
+            const avatarEl = document.getElementById('user-avatar');
+            
+            if (nameEl) {
+                nameEl.textContent = profile.displayName || 
+                    this.currentUser.email?.split('@')[0] || 'Usuario';
+            }
+            
+            if (planEl) {
+                const plan = PLANS.getPlanById(profile.plan || 'PERSONAL_GRATUITO');
+                planEl.textContent = plan?.name || 'Plan Gratuito';
+            }
+            
+            const avatarUrl = profile.photoURL || 
+                `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.displayName || 'User')}&background=6C5CE7&color=fff&size=80`;
+            
+            if (avatarEl) avatarEl.src = avatarUrl;
+            
+            this.updateStorageBar(profile);
+            
+            // Deshabilitar subida para anónimos
             const uploadBtn = document.getElementById('upload-btn');
-            if (uploadBtn) {
+            if (uploadBtn && profile.isAnonymous) {
                 uploadBtn.disabled = true;
-                uploadBtn.title = 'Los usuarios anónimos no pueden subir archivos';
+                uploadBtn.title = 'Usuarios anónimos no pueden subir archivos';
                 uploadBtn.style.opacity = '0.5';
             }
+        } catch (error) {
+            console.error('Error cargando perfil:', error);
         }
     },
 
-    // Actualizar barra de almacenamiento
     updateStorageBar(profile) {
-        const storageUsed = profile.storageUsed || 0;
-        const plan = PLANS.PERSONAL.GRATUITO;
-        const maxStorage = plan.storage;
-        const percentage = Math.min(100, (storageUsed / maxStorage) * 100);
+        const storageUsed = profile?.storageUsed || 0;
+        const planId = profile?.plan || 'PERSONAL_GRATUITO';
+        const maxStorage = PLANS.getStorageLimit(planId);
+        const percentage = maxStorage > 0 ? Math.min(100, (storageUsed / maxStorage) * 100) : 0;
         
-        document.getElementById('storage-progress').style.width = percentage + '%';
-        document.getElementById('storage-text').textContent = 
-            `${Utils.formatBytes(storageUsed)} / ${Utils.formatBytes(maxStorage)} usado`;
+        const progressBar = document.getElementById('storage-progress');
+        const storageText = document.getElementById('storage-text');
         
-        // Cambiar color si está casi lleno
-        if (percentage > 90) {
-            document.getElementById('storage-progress').style.background = '#FF6B6B';
+        if (progressBar) {
+            progressBar.style.width = percentage + '%';
+            progressBar.classList.remove('warning', 'danger');
+            if (percentage > 90) progressBar.classList.add('danger');
+            else if (percentage > 75) progressBar.classList.add('warning');
+        }
+        
+        if (storageText) {
+            storageText.textContent = `${Utils.formatBytes(storageUsed)} / ${Utils.formatBytes(maxStorage)} usado`;
         }
     },
 
@@ -96,12 +106,10 @@ const UI = {
         this.selectedFiles.clear();
         this.updateToolbar();
         
-        // Actualizar botones de navegación
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
         const activeBtn = document.querySelector(`[data-view="${view}"]`);
         if (activeBtn) activeBtn.classList.add('active');
         
-        // Actualizar título
         const titles = {
             'my-drive': 'Mi unidad',
             'shared': 'Compartidos conmigo',
@@ -111,7 +119,12 @@ const UI = {
         };
         document.getElementById('current-view-title').textContent = titles[view] || 'Archivos';
         
-        // Mostrar loader
+        // Botones especiales de papelera
+        const restoreBtn = document.getElementById('restore-btn');
+        const deleteForeverBtn = document.getElementById('delete-forever-btn');
+        if (restoreBtn) restoreBtn.style.display = view === 'trash' ? 'inline-flex' : 'none';
+        if (deleteForeverBtn) deleteForeverBtn.style.display = view === 'trash' ? 'inline-flex' : 'none';
+        
         this.showContentLoader(true);
         
         try {
@@ -128,20 +141,20 @@ const UI = {
             this.filesCache = files;
             this.renderFileList(files);
         } catch (error) {
-            console.error('❌ Error navegando:', error);
+            console.error('Error navegando:', error);
             this.showNotification('Error al cargar archivos', 'error');
+            this.renderFileList([]);
         } finally {
             this.showContentLoader(false);
         }
     },
 
-    // ========== RENDERIZADO DE ARCHIVOS ==========
+    // ========== RENDERIZADO ==========
     renderFileList(files) {
         const container = document.getElementById('file-list');
         const emptyState = document.getElementById('empty-state');
         
         if (!container) return;
-        
         container.innerHTML = '';
         
         if (!files || files.length === 0) {
@@ -160,8 +173,12 @@ const UI = {
     createFileCard(file, index) {
         const card = document.createElement('div');
         card.className = 'file-card animate__animated animate__fadeInUp';
-        card.style.animationDelay = `${index * 0.05}s`;
+        card.style.animationDelay = `${index * 0.03}s`;
         card.dataset.fileId = file.id;
+        
+        if (this.selectedFiles.has(file.id)) {
+            card.classList.add('selected');
+        }
         
         const isFolder = file.type === 'folder';
         const iconClass = isFolder ? 'fa-solid fa-folder' : Utils.getFileIcon(file.name, file.type);
@@ -170,39 +187,42 @@ const UI = {
         card.innerHTML = `
             <div class="file-icon">
                 <i class="${iconClass}" style="color: ${iconColor}; font-size: 2rem;"></i>
-                ${file.starred ? '<i class="fa-solid fa-star" style="color: #FFD43B; font-size: 0.8rem; position: absolute; top: 8px; left: 8px;"></i>' : ''}
             </div>
+            ${file.starred ? '<div class="star-badge"><i class="fa-solid fa-star"></i></div>' : ''}
             <div class="file-name" title="${file.originalName || file.name}">${Utils.truncate(file.originalName || file.name, 25)}</div>
             <div class="file-meta">
-                ${!isFolder ? Utils.formatBytes(file.size) : 'Carpeta'} · ${Utils.formatDate(file.updatedAt || file.createdAt)}
+                ${isFolder ? 'Carpeta' : Utils.formatBytes(file.size)} · ${Utils.formatDate(file.updatedAt || file.createdAt)}
             </div>
             <div class="file-actions">
-                ${!isFolder ? `<button onclick="event.stopPropagation(); UI.previewFile('${file.id}')" title="Vista previa"><i class="fa-solid fa-eye"></i></button>` : ''}
-                <button onclick="event.stopPropagation(); UI.shareFileDialog('${file.id}')" title="Compartir"><i class="fa-solid fa-share-nodes"></i></button>
-                <button onclick="event.stopPropagation(); UI.toggleStar('${file.id}')" title="Destacar"><i class="fa-solid fa-star"></i></button>
-                <button onclick="event.stopPropagation(); UI.moveToTrash('${file.id}')" title="Mover a papelera"><i class="fa-solid fa-trash"></i></button>
+                ${!isFolder ? `<button title="Vista previa" onclick="event.stopPropagation(); UI.previewFile('${file.id}')"><i class="fa-solid fa-eye"></i></button>` : ''}
+                <button title="Compartir" onclick="event.stopPropagation(); UI.shareFileDialog('${file.id}')"><i class="fa-solid fa-share-nodes"></i></button>
+                <button title="Destacar" onclick="event.stopPropagation(); UI.toggleStar('${file.id}')"><i class="fa-solid fa-star"></i></button>
+                ${this.currentView === 'trash' ? `
+                    <button title="Restaurar" onclick="event.stopPropagation(); UI.restoreFromTrash('${file.id}')"><i class="fa-solid fa-rotate-left"></i></button>
+                    <button title="Eliminar para siempre" onclick="event.stopPropagation(); UI.deletePermanently('${file.id}')" style="color: var(--danger);"><i class="fa-solid fa-trash"></i></button>
+                ` : `
+                    <button title="Mover a papelera" onclick="event.stopPropagation(); UI.moveToTrash('${file.id}')"><i class="fa-solid fa-trash-can"></i></button>
+                `}
             </div>
         `;
         
-        // Eventos
+        // Click normal
         card.addEventListener('click', (e) => {
             if (e.ctrlKey || e.metaKey) {
-                // Selección múltiple
+                e.preventDefault();
                 this.toggleFileSelection(file.id, card);
-            } else if (isFolder) {
-                // Navegar a carpeta
+            } else if (isFolder && this.currentView !== 'trash') {
                 this.navigateTo('my-drive', file.id);
-            } else {
-                // Abrir archivo
+            } else if (!isFolder) {
                 this.previewFile(file.id);
             }
         });
         
-        // Doble clic para abrir
+        // Doble clic
         card.addEventListener('dblclick', (e) => {
-            if (isFolder) {
+            if (isFolder && this.currentView !== 'trash') {
                 this.navigateTo('my-drive', file.id);
-            } else {
+            } else if (!isFolder) {
                 this.previewFile(file.id);
             }
         });
@@ -216,202 +236,253 @@ const UI = {
         return card;
     },
 
+    // ========== SELECCIÓN ==========
+    toggleFileSelection(fileId, cardElement) {
+        if (this.selectedFiles.has(fileId)) {
+            this.selectedFiles.delete(fileId);
+            if (cardElement) cardElement.classList.remove('selected');
+        } else {
+            this.selectedFiles.add(fileId);
+            if (cardElement) cardElement.classList.add('selected');
+        }
+        this.updateToolbar();
+    },
+
+    updateToolbar() {
+        const toolbar = document.getElementById('toolbar');
+        const count = document.getElementById('selected-count');
+        
+        if (!toolbar) return;
+        
+        if (this.selectedFiles.size > 0) {
+            toolbar.style.display = 'flex';
+            if (count) count.textContent = `${this.selectedFiles.size} seleccionado(s)`;
+        } else {
+            toolbar.style.display = 'none';
+        }
+    },
+
     // ========== OPERACIONES CON ARCHIVOS ==========
     async handleFileUpload(files) {
-    if (!files || files.length === 0) return;
-    
-    const user = this.currentUser;
-    if (!user) return;
-    
-    const profile = await Database.getUserProfile(user.uid);
-    if (profile?.isAnonymous) {
-        this.showNotification('Los usuarios anónimos no pueden subir archivos', 'error');
-        return;
-    }
-    
-    // Mostrar panel de subidas
-    this.showUploadPanel();
-    
-    for (const file of files) {
-        const uploadId = Utils.generateId();
-        const uploadItem = this.createUploadItem(uploadId, file);
-        document.getElementById('upload-list').appendChild(uploadItem);
+        if (!files || files.length === 0) return;
         
-        try {
-            const result = await StorageManager.uploadFile(user.uid, file, (progress) => {
-                this.updateUploadProgress(uploadId, progress, file);
-            });
+        const user = this.currentUser;
+        if (!user) return;
+        
+        const profile = await Database.getUserProfile(user.uid);
+        if (profile?.isAnonymous) {
+            this.showNotification('Los usuarios anónimos no pueden subir archivos', 'error');
+            return;
+        }
+        
+        // Mostrar panel de subidas
+        this.showUploadPanel();
+        this._activeUploads += files.length;
+        this.updateUploadCount();
+        
+        for (const file of files) {
+            const uploadId = Utils.generateId();
+            this._uploadStartTimes[uploadId] = Date.now();
             
-            this.completeUploadItem(uploadId, result);
-            this.showNotification(`${file.name} subido correctamente`, 'success');
-        } catch (error) {
-            this.failUploadItem(uploadId, error.message);
-            this.showNotification(`Error: ${error.message}`, 'error');
+            const uploadItem = this.createUploadItem(uploadId, file);
+            document.getElementById('upload-list').appendChild(uploadItem);
+            
+            try {
+                const result = await StorageManager.uploadFile(user.uid, file, (progress) => {
+                    this.updateUploadProgress(uploadId, progress, file);
+                });
+                
+                this.completeUploadItem(uploadId, result);
+                this.showNotification(`"${file.name}" subido correctamente`, 'success');
+            } catch (error) {
+                this.failUploadItem(uploadId, error.message);
+                this.showNotification(`Error: ${error.message}`, 'error');
+            } finally {
+                this._activeUploads--;
+                this.updateUploadCount();
+            }
         }
-    }
-    
-    // Recargar vista
-    this.navigateTo(this.currentView, this.currentFolder);
-    await this.loadUserProfile();
-},
-
-createUploadItem(uploadId, file) {
-    const item = document.createElement('div');
-    item.className = 'upload-item';
-    item.id = `upload-${uploadId}`;
-    item.innerHTML = `
-        <div class="upload-item-icon">
-            <i class="${Utils.getFileIcon(file.name, file.type)}" style="color: ${Utils.getFileColor(file.name, file.type)};"></i>
-        </div>
-        <div class="upload-item-info">
-            <div class="upload-item-name">${file.name}</div>
-            <div class="upload-item-status">Subiendo... 0%</div>
-        </div>
-        <div class="upload-item-progress">
-            <svg class="progress-ring" width="32" height="32">
-                <circle class="progress-ring-circle-bg" cx="16" cy="16" r="14"></circle>
-                <circle class="progress-ring-circle" cx="16" cy="16" r="14" 
-                    stroke-dasharray="87.96" stroke-dashoffset="87.96"></circle>
-            </svg>
-        </div>
-    `;
-    return item;
-},
-
-updateUploadProgress(uploadId, progress, file) {
-    const item = document.getElementById(`upload-${uploadId}`);
-    if (!item) return;
-    
-    const circle = item.querySelector('.progress-ring-circle');
-    const status = item.querySelector('.upload-item-status');
-    const circumference = 87.96;
-    const offset = circumference - (progress / 100) * circumference;
-    
-    circle.style.strokeDashoffset = offset;
-    
-    // Calcular tiempo restante estimado
-    const elapsed = Date.now() - (item._startTime || Date.now());
-    item._startTime = item._startTime || Date.now();
-    
-    if (progress > 0 && progress < 100) {
-        const totalTime = (elapsed / progress) * 100;
-        const remaining = totalTime - elapsed;
-        const minutes = Math.ceil(remaining / 60000);
         
-        if (minutes > 0) {
-            status.textContent = `Subiendo... ${progress}% · Queda${minutes > 1 ? 'n' : ''} ${minutes} minuto${minutes > 1 ? 's' : ''}`;
-        } else {
-            status.textContent = `Subiendo... ${progress}% · Casi listo`;
+        this.navigateTo(this.currentView, this.currentFolder);
+        await this.loadUserProfile();
+    },
+
+    createUploadItem(uploadId, file) {
+        const item = document.createElement('div');
+        item.className = 'upload-item';
+        item.id = `upload-${uploadId}`;
+        item.innerHTML = `
+            <div class="upload-item-icon">
+                <i class="${Utils.getFileIcon(file.name, file.type)}" style="color: ${Utils.getFileColor(file.name, file.type)};"></i>
+            </div>
+            <div class="upload-item-info">
+                <div class="upload-item-name">${Utils.truncate(file.name, 30)}</div>
+                <div class="upload-item-status">Preparando...</div>
+            </div>
+            <div class="upload-item-progress">
+                <svg class="progress-ring" width="36" height="36">
+                    <circle class="progress-ring-circle-bg" cx="18" cy="18" r="15"></circle>
+                    <circle class="progress-ring-circle" cx="18" cy="18" r="15" 
+                        stroke-dasharray="94.25" stroke-dashoffset="94.25"></circle>
+                </svg>
+            </div>
+            <div class="upload-item-actions">
+                <button onclick="UI.cancelUpload('${uploadId}')" title="Cancelar">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        `;
+        return item;
+    },
+
+    updateUploadProgress(uploadId, progress, file) {
+        const item = document.getElementById(`upload-${uploadId}`);
+        if (!item) return;
+        
+        const circle = item.querySelector('.progress-ring-circle');
+        const status = item.querySelector('.upload-item-status');
+        const circumference = 94.25;
+        const offset = circumference - (progress / 100) * circumference;
+        
+        if (circle) {
+            circle.style.strokeDashoffset = offset;
         }
-    } else {
-        status.textContent = `Subiendo... ${progress}%`;
-    }
-    
-    if (progress >= 100) {
-        circle.style.stroke = '#51CF66';
-    }
-},
-
-completeUploadItem(uploadId, fileData) {
-    const item = document.getElementById(`upload-${uploadId}`);
-    if (!item) return;
-    
-    const status = item.querySelector('.upload-item-status');
-    status.textContent = '✅ Completado';
-    status.style.color = '#51CF66';
-    
-    const circle = item.querySelector('.progress-ring-circle');
-    circle.style.strokeDashoffset = '0';
-    circle.style.stroke = '#51CF66';
-    
-    // Auto-ocultar después de 3 segundos
-    setTimeout(() => {
-        item.style.opacity = '0';
-        item.style.transform = 'translateX(100px)';
-        item.style.transition = 'all 0.3s ease';
-        setTimeout(() => item.remove(), 300);
-    }, 3000);
-},
-
-failUploadItem(uploadId, errorMsg) {
-    const item = document.getElementById(`upload-${uploadId}`);
-    if (!item) return;
-    
-    const status = item.querySelector('.upload-item-status');
-    status.textContent = `❌ ${errorMsg}`;
-    status.style.color = '#FF6B6B';
-    
-    const circle = item.querySelector('.progress-ring-circle');
-    circle.style.stroke = '#FF6B6B';
-},
-
-showUploadPanel() {
-    const panel = document.getElementById('upload-panel');
-    if (panel) panel.style.display = 'block';
-},
-
-toggleUploadPanel() {
-    const panel = document.getElementById('upload-panel');
-    const list = document.getElementById('upload-list');
-    if (panel && list) {
-        if (list.style.display === 'none') {
-            list.style.display = 'block';
-        } else {
-            list.style.display = 'none';
+        
+        if (status) {
+            const startTime = this._uploadStartTimes[uploadId] || Date.now();
+            const elapsed = (Date.now() - startTime) / 1000;
+            
+            if (progress > 0 && progress < 100 && elapsed > 1) {
+                const totalTime = (elapsed / progress) * 100;
+                const remaining = totalTime - elapsed;
+                
+                if (remaining > 60) {
+                    const mins = Math.ceil(remaining / 60);
+                    status.textContent = `Subiendo... ${progress}% · Quedan ${mins} min`;
+                } else if (remaining > 10) {
+                    status.textContent = `Subiendo... ${progress}% · ${Math.ceil(remaining)}s restantes`;
+                } else if (remaining > 0) {
+                    status.textContent = `Subiendo... ${progress}% · Casi listo`;
+                } else {
+                    status.textContent = `Subiendo... ${progress}%`;
+                }
+            } else {
+                status.textContent = `Subiendo... ${progress}%`;
+            }
         }
-    }
-}
+        
+        if (progress >= 100 && circle) {
+            circle.style.stroke = '#51CF66';
+        }
+    },
+
+    completeUploadItem(uploadId, fileData) {
+        const item = document.getElementById(`upload-${uploadId}`);
+        if (!item) return;
+        
+        const status = item.querySelector('.upload-item-status');
+        if (status) {
+            status.textContent = '✅ Completado';
+            status.style.color = '#51CF66';
+        }
+        
+        const circle = item.querySelector('.progress-ring-circle');
+        if (circle) {
+            circle.style.strokeDashoffset = '0';
+            circle.style.stroke = '#51CF66';
+        }
+        
+        // Auto-ocultar
+        setTimeout(() => {
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(20px)';
+                item.style.transition = 'all 0.4s ease';
+                setTimeout(() => item.remove(), 400);
+            }
+        }, 3000);
+        
+        delete this._uploadStartTimes[uploadId];
+    },
+
+    failUploadItem(uploadId, errorMsg) {
+        const item = document.getElementById(`upload-${uploadId}`);
+        if (!item) return;
+        
+        const status = item.querySelector('.upload-item-status');
+        if (status) {
+            status.textContent = `❌ ${errorMsg}`;
+            status.style.color = '#FF6B6B';
+        }
+        
+        const circle = item.querySelector('.progress-ring-circle');
+        if (circle) {
+            circle.style.stroke = '#FF6B6B';
+        }
+        
+        delete this._uploadStartTimes[uploadId];
+    },
+
+    cancelUpload(uploadId) {
+        const item = document.getElementById(`upload-${uploadId}`);
+        if (item) {
+            item.style.opacity = '0';
+            item.style.transition = 'all 0.3s ease';
+            setTimeout(() => item.remove(), 300);
+        }
+        this._activeUploads = Math.max(0, this._activeUploads - 1);
+        this.updateUploadCount();
+        delete this._uploadStartTimes[uploadId];
+        this.showNotification('Subida cancelada', 'warning');
+    },
+
+    updateUploadCount() {
+        const countEl = document.querySelector('.upload-count');
+        if (countEl) {
+            countEl.textContent = this._activeUploads;
+            countEl.style.display = this._activeUploads > 0 ? 'inline' : 'none';
+        }
+    },
+
+    showUploadPanel() {
+        const panel = document.getElementById('upload-panel');
+        if (panel) {
+            panel.style.display = 'block';
+            panel.querySelector('.upload-list').style.display = 'block';
+        }
+    },
+
+    toggleUploadPanel() {
+        const panel = document.getElementById('upload-panel');
+        const list = document.getElementById('upload-list');
+        if (panel && list) {
+            list.style.display = list.style.display === 'none' ? 'block' : 'none';
+        }
+    },
 
     async createFolder() {
-        const folderName = prompt('Nombre de la carpeta:');
+        const folderName = prompt('📁 Nombre de la nueva carpeta:');
         if (!folderName || !folderName.trim()) return;
         
         try {
             await Database.createFolder(this.currentUser.uid, folderName.trim(), this.currentFolder);
-            this.showNotification('Carpeta creada', 'success');
+            this.showNotification(`Carpeta "${folderName}" creada`, 'success');
             this.navigateTo(this.currentView, this.currentFolder);
         } catch (error) {
             this.showNotification('Error al crear carpeta', 'error');
         }
     },
 
-    async previewFile(fileId) {
+    // ========== PAPELERA (CORREGIDO) ==========
+    async moveToTrash(fileId) {
         const file = await Database.getFile(this.currentUser.uid, fileId);
         if (!file) return;
         
-        if (file.type === 'folder') {
-            this.navigateTo('my-drive', file.id);
-            return;
-        }
+        const message = file.type === 'folder' 
+            ? `¿Mover la carpeta "${file.name}" y su contenido a la papelera?`
+            : `¿Mover "${file.originalName || file.name}" a la papelera?`;
         
-        try {
-            const url = await StorageManager.getFileUrl(file);
-            if (url) {
-                if (url.startsWith('data:')) {
-                    // Mostrar preview en modal para imágenes
-                    if (file.type?.startsWith('image/')) {
-                        this.showModal(`
-                            <div style="text-align: center;">
-                                <h3>${file.originalName || file.name}</h3>
-                                <img src="${url}" style="max-width: 100%; max-height: 70vh; border-radius: 8px;" alt="${file.name}">
-                            </div>
-                        `);
-                    } else {
-                        window.open(url, '_blank');
-                    }
-                } else {
-                    window.open(url, '_blank');
-                }
-            } else {
-                this.showNotification('No se puede previsualizar este archivo', 'error');
-            }
-        } catch (error) {
-            this.showNotification('Error al abrir archivo', 'error');
-        }
-    },
-
-    async moveToTrash(fileId) {
-        if (!confirm('¿Mover a la papelera?')) return;
+        if (!confirm(message)) return;
         
         try {
             await Database.moveToTrash(this.currentUser.uid, fileId);
@@ -423,15 +494,233 @@ toggleUploadPanel() {
         }
     },
 
-    async toggleStar(fileId) {
+    async restoreFromTrash(fileId) {
+        try {
+            await Database.restoreFromTrash(this.currentUser.uid, fileId);
+            this.showNotification('Archivo restaurado', 'success');
+            this.navigateTo(this.currentView, this.currentFolder);
+        } catch (error) {
+            this.showNotification('Error al restaurar', 'error');
+        }
+    },
+
+    async deletePermanently(fileId) {
         const file = await Database.getFile(this.currentUser.uid, fileId);
         if (!file) return;
         
-        await Database.updateFile(this.currentUser.uid, fileId, { 
-            starred: !file.starred 
-        });
+        if (!confirm(`⚠️ ¿Eliminar "${file.originalName || file.name}" PARA SIEMPRE?\n\nEsta acción NO se puede deshacer.`)) return;
         
+        try {
+            await StorageManager.deleteFilePermanently(this.currentUser.uid, file);
+            this.showNotification('Archivo eliminado permanentemente', 'success');
+            this.navigateTo(this.currentView, this.currentFolder);
+            await this.loadUserProfile();
+        } catch (error) {
+            this.showNotification('Error al eliminar', 'error');
+        }
+    },
+
+    // ========== ACCIONES EN LOTE ==========
+    async moveToTrashSelected() {
+        if (this.selectedFiles.size === 0) return;
+        if (!confirm(`¿Mover ${this.selectedFiles.size} archivo(s) a la papelera?`)) return;
+        
+        for (const fileId of this.selectedFiles) {
+            await Database.moveToTrash(this.currentUser.uid, fileId);
+        }
+        
+        this.selectedFiles.clear();
+        this.updateToolbar();
         this.navigateTo(this.currentView, this.currentFolder);
+        this.showNotification('Archivos movidos a la papelera', 'success');
+    },
+
+    async restoreSelected() {
+        if (this.selectedFiles.size === 0) return;
+        
+        for (const fileId of this.selectedFiles) {
+            await Database.restoreFromTrash(this.currentUser.uid, fileId);
+        }
+        
+        this.selectedFiles.clear();
+        this.updateToolbar();
+        this.navigateTo(this.currentView, this.currentFolder);
+        this.showNotification('Archivos restaurados', 'success');
+    },
+
+    async deletePermanentlySelected() {
+        if (this.selectedFiles.size === 0) return;
+        if (!confirm(`⚠️ ¿Eliminar ${this.selectedFiles.size} archivo(s) PARA SIEMPRE?`)) return;
+        
+        for (const fileId of this.selectedFiles) {
+            const file = await Database.getFile(this.currentUser.uid, fileId);
+            if (file) {
+                await StorageManager.deleteFilePermanently(this.currentUser.uid, file);
+            }
+        }
+        
+        this.selectedFiles.clear();
+        this.updateToolbar();
+        this.navigateTo(this.currentView, this.currentFolder);
+    },
+
+    async downloadSelected() {
+        for (const fileId of this.selectedFiles) {
+            const file = await Database.getFile(this.currentUser.uid, fileId);
+            if (file && file.type !== 'folder') {
+                await StorageManager.downloadFile(file);
+            }
+        }
+    },
+
+    async shareSelected() {
+        if (this.selectedFiles.size === 0) return;
+        if (this.selectedFiles.size === 1) {
+            const fileId = this.selectedFiles.values().next().value;
+            this.shareFileDialog(fileId);
+        } else {
+            this.showNotification('Selecciona un solo archivo para compartir', 'warning');
+        }
+    },
+
+    // ========== PREVIEW (CORREGIDO) ==========
+    async previewFile(fileId) {
+        const file = await Database.getFile(this.currentUser.uid, fileId);
+        if (!file) return;
+        
+        if (file.type === 'folder') {
+            this.navigateTo('my-drive', file.id);
+            return;
+        }
+        
+        const overlay = document.getElementById('file-preview-overlay');
+        const body = document.getElementById('file-preview-body');
+        const nameEl = document.getElementById('file-preview-name');
+        
+        if (!overlay || !body || !nameEl) return;
+        
+        nameEl.textContent = file.originalName || file.name;
+        this._currentPreviewFile = file;
+        
+        body.innerHTML = '<div class="content-loader"><i class="fa-solid fa-spinner fa-spin fa-2x"></i><p class="mt-10">Cargando vista previa...</p></div>';
+        overlay.style.display = 'flex';
+        
+        try {
+            const url = await StorageManager.getFileUrl(file);
+            
+            if (!url) {
+                body.innerHTML = this._getUnsupportedPreviewHTML(file);
+                return;
+            }
+            
+            const mimeType = file.type || '';
+            const ext = Utils.getFileExtension(file.name);
+            
+            // Imagen
+            if (mimeType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) {
+                body.innerHTML = `<img src="${url}" alt="${file.name}" onerror="this.parentElement.innerHTML=UI._getUnsupportedPreviewHTML(UI._currentPreviewFile)">`;
+            }
+            // Video
+            else if (mimeType.startsWith('video/') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(ext)) {
+                body.innerHTML = `
+                    <video controls autoplay style="max-width: 100%; max-height: 75vh;">
+                        <source src="${url}" type="${mimeType || 'video/mp4'}">
+                        Tu navegador no soporta video.
+                    </video>`;
+            }
+            // Audio
+            else if (mimeType.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'].includes(ext)) {
+                body.innerHTML = `
+                    <div style="text-align: center; padding: 40px;">
+                        <i class="fa-solid fa-music fa-4x mb-20" style="color: #FFD43B;"></i>
+                        <p style="font-size: 1.2rem; margin-bottom: 16px;">${file.originalName || file.name}</p>
+                        <audio controls style="width: 100%; max-width: 500px;">
+                            <source src="${url}" type="${mimeType || 'audio/mpeg'}">
+                        </audio>
+                    </div>`;
+            }
+            // PDF
+            else if (mimeType === 'application/pdf' || ext === 'pdf') {
+                body.innerHTML = `<iframe src="${url}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>`;
+            }
+            // Texto plano
+            else if (mimeType.startsWith('text/') || ['txt', 'csv', 'log', 'md'].includes(ext)) {
+                if (url.startsWith('data:')) {
+                    try {
+                        const base64 = url.split(',')[1];
+                        const text = atob(base64);
+                        body.innerHTML = `<pre>${this.escapeHtml(text)}</pre>`;
+                    } catch (e) {
+                        body.innerHTML = `<iframe src="${url}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>`;
+                    }
+                } else {
+                    body.innerHTML = `<iframe src="${url}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>`;
+                }
+            }
+            // Código
+            else if (['html', 'htm', 'css', 'js', 'json', 'xml', 'py', 'java', 'cpp', 'php', 'sql'].includes(ext)) {
+                if (ext === 'html' || ext === 'htm') {
+                    if (url.startsWith('data:')) {
+                        const base64 = url.split(',')[1];
+                        const html = atob(base64);
+                        body.innerHTML = `<iframe srcdoc="${this.escapeAttr(html)}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>`;
+                    } else {
+                        body.innerHTML = `<iframe src="${url}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>`;
+                    }
+                } else if (url.startsWith('data:')) {
+                    try {
+                        const base64 = url.split(',')[1];
+                        const code = atob(base64);
+                        body.innerHTML = `<pre>${this.escapeHtml(code)}</pre>`;
+                    } catch (e) {
+                        body.innerHTML = this._getUnsupportedPreviewHTML(file);
+                    }
+                } else {
+                    body.innerHTML = `<iframe src="${url}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>`;
+                }
+            }
+            // Otros
+            else {
+                body.innerHTML = this._getUnsupportedPreviewHTML(file);
+            }
+        } catch (error) {
+            console.error('Error en preview:', error);
+            body.innerHTML = this._getUnsupportedPreviewHTML(file, error.message);
+        }
+    },
+
+    _getUnsupportedPreviewHTML(file, errorMsg = null) {
+        const iconClass = Utils.getFileIcon(file.name, file.type);
+        const iconColor = Utils.getFileColor(file.name, file.type);
+        
+        return `
+            <div class="unsupported">
+                <i class="${iconClass} fa-4x mb-10" style="color: ${iconColor}; display: block;"></i>
+                <p style="font-size: 1.1rem; font-weight: 500;">${file.originalName || file.name}</p>
+                <p class="text-secondary">${Utils.formatBytes(file.size)} · ${file.type || 'Tipo desconocido'}</p>
+                ${errorMsg ? `<p class="text-danger mt-10">Error: ${errorMsg}</p>` : ''}
+                <div style="display: flex; gap: 8px; justify-content: center; margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="StorageManager.downloadFile(UI._currentPreviewFile)">
+                        <i class="fa-solid fa-download"></i> Descargar
+                    </button>
+                    <button class="btn btn-outline" onclick="UI.closeFilePreview()">
+                        <i class="fa-solid fa-times"></i> Cerrar
+                    </button>
+                </div>
+            </div>
+        `;
+    },
+
+    closeFilePreview() {
+        const overlay = document.getElementById('file-preview-overlay');
+        if (overlay) overlay.style.display = 'none';
+        this._currentPreviewFile = null;
+    },
+
+    downloadCurrentPreview() {
+        if (this._currentPreviewFile) {
+            StorageManager.downloadFile(this._currentPreviewFile);
+        }
     },
 
     // ========== COMPARTIR ==========
@@ -443,28 +732,38 @@ toggleUploadPanel() {
             const result = await ShareManager.createShareLink(this.currentUser.uid, fileId);
             
             this.showModal(`
-                <h3><i class="fa-solid fa-share-nodes"></i> Compartir: ${Utils.truncate(file.name, 30)}</h3>
-                <div style="margin: 20px 0;">
-                    <label>Link de acceso:</label>
-                    <div class="input-group" style="margin-top: 8px;">
-                        <input type="text" value="${result.link}" readonly class="input-field" id="share-link-input">
+                <h2><i class="fa-solid fa-share-nodes"></i> Compartir</h2>
+                <p class="text-secondary mb-10">${Utils.truncate(file.originalName || file.name, 40)}</p>
+                <div style="margin: 16px 0;">
+                    <label class="text-secondary" style="font-size: 0.85rem;">Link de acceso:</label>
+                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                        <input type="text" value="${result.link}" readonly class="input-field" id="share-link-input" style="flex: 1;">
                         <button class="btn btn-primary btn-sm" onclick="ShareManager.copyToClipboard('${result.link}')">
                             <i class="fa-solid fa-copy"></i> Copiar
                         </button>
                     </div>
                 </div>
-                <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-outline btn-sm" onclick="ShareManager.shareByEmail('${result.link}', prompt('Email del destinatario:'))">
-                        <i class="fa-solid fa-envelope"></i> Enviar por email
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="btn btn-outline btn-sm" onclick="ShareManager.shareByEmail('${result.link}', prompt('Email del destinatario:')); UI.closeModal();">
+                        <i class="fa-solid fa-envelope"></i> Email
                     </button>
                     <button class="btn btn-outline btn-sm" onclick="window.open('${ShareManager.generateQRCode(result.link)}', '_blank')">
-                        <i class="fa-solid fa-qrcode"></i> Código QR
+                        <i class="fa-solid fa-qrcode"></i> QR
                     </button>
                 </div>
             `);
         } catch (error) {
             this.showNotification('Error al compartir', 'error');
         }
+    },
+
+    // ========== ESTRELLAS ==========
+    async toggleStar(fileId) {
+        const file = await Database.getFile(this.currentUser.uid, fileId);
+        if (!file) return;
+        
+        await Database.updateFile(this.currentUser.uid, fileId, { starred: !file.starred });
+        this.navigateTo(this.currentView, this.currentFolder);
     },
 
     // ========== BÚSQUEDA ==========
@@ -481,6 +780,7 @@ toggleUploadPanel() {
         try {
             const results = await Database.searchFiles(this.currentUser.uid, query);
             this.renderFileList(results);
+            document.getElementById('current-view-title').textContent = `Resultados para: "${query}"`;
         } catch (error) {
             this.showNotification('Error en búsqueda', 'error');
         } finally {
@@ -488,64 +788,46 @@ toggleUploadPanel() {
         }
     },
 
-    // ========== PERFIL Y AJUSTES ==========
-    async showProfileModal() {
-        const profile = await Database.getUserProfile(this.currentUser.uid);
-        if (!profile) return;
+    // ========== AJUSTES ==========
+    showSettingsTab() {
+        const panel = document.getElementById('settings-panel');
+        if (!panel) return;
         
-        this.showModal(`
-            <div class="profile-settings">
-                <h2><i class="fa-solid fa-user-gear"></i> Mi perfil</h2>
-                
-                <div class="profile-avatar-section" style="text-align: center; margin: 20px 0;">
-                    <img src="${profile.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.displayName || 'User')}&background=6C5CE7&color=fff&size=120`}" 
-                         style="width: 100px; height: 100px; border-radius: 50%; border: 3px solid var(--primary);">
-                    <button class="btn btn-outline btn-sm mt-10" onclick="UI.changeAvatar()">
-                        <i class="fa-solid fa-camera"></i> Cambiar foto
-                    </button>
-                </div>
-                
-                <div class="input-group mt-10">
-                    <label>Nombre de usuario</label>
-                    <input type="text" id="profile-username" class="input-field" value="${profile.displayName || ''}" placeholder="Tu nombre">
-                </div>
-                
-                <div class="input-group mt-10">
-                    <label>Correo electrónico</label>
-                    <input type="email" class="input-field" value="${profile.email || this.currentUser.email || ''}" readonly>
-                </div>
-                
-                <div class="input-group mt-10">
-                    <label>Plan actual</label>
-                    <input type="text" class="input-field" value="${profile.plan || 'Gratuito'}" readonly>
-                </div>
-                
-                <div style="display: flex; gap: 8px; margin-top: 20px;">
-                    <button class="btn btn-primary" onclick="UI.saveProfile()">
-                        <i class="fa-solid fa-floppy-disk"></i> Guardar cambios
-                    </button>
-                    <button class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
-                </div>
-            </div>
-        `);
+        panel.style.display = 'block';
+        this.loadSettingsData();
     },
 
-    async changeAvatar() {
-        const url = prompt('URL de tu nueva foto de perfil:');
-        if (!url) return;
+    closeSettingsTab() {
+        const panel = document.getElementById('settings-panel');
+        if (panel) panel.style.display = 'none';
+    },
+
+    async loadSettingsData() {
+        const user = this.currentUser;
+        if (!user) return;
         
         try {
-            await Database.updateUserProfile(this.currentUser.uid, { photoURL: url });
-            this.showNotification('Foto actualizada', 'success');
-            await this.loadUserProfile();
-            this.showProfileModal(); // Recargar modal
+            const profile = await Database.getUserProfile(user.uid);
+            if (!profile) return;
+            
+            const usernameEl = document.getElementById('settings-username');
+            const emailEl = document.getElementById('settings-email');
+            const avatarEl = document.getElementById('settings-avatar');
+            
+            if (usernameEl) usernameEl.value = profile.displayName || '';
+            if (emailEl) emailEl.value = profile.email || user.email || '';
+            if (avatarEl) {
+                avatarEl.src = profile.photoURL || 
+                    `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.displayName || 'User')}&background=6C5CE7&color=fff&size=160`;
+            }
         } catch (error) {
-            this.showNotification('Error al actualizar foto', 'error');
+            console.error('Error cargando ajustes:', error);
         }
     },
 
-    async saveProfile() {
-        const username = document.getElementById('profile-username')?.value.trim();
+    async saveSettings() {
+        const usernameEl = document.getElementById('settings-username');
+        const username = usernameEl?.value?.trim();
         
         if (!username) {
             this.showNotification('El nombre no puede estar vacío', 'error');
@@ -553,53 +835,124 @@ toggleUploadPanel() {
         }
         
         try {
-            await Database.updateUserProfile(this.currentUser.uid, { 
-                displayName: username 
-            });
+            await Database.updateUserProfile(this.currentUser.uid, { displayName: username });
             
-            // Actualizar en Firebase Auth
-            const user = this.currentUser;
-            if (user) {
-                await user.updateProfile({ displayName: username });
+            if (this.currentUser.updateProfile) {
+                await this.currentUser.updateProfile({ displayName: username });
             }
             
             this.showNotification('Perfil actualizado', 'success');
-            this.closeModal();
+            this.closeSettingsTab();
             await this.loadUserProfile();
         } catch (error) {
-            this.showNotification('Error al guardar perfil', 'error');
+            this.showNotification('Error: ' + error.message, 'error');
         }
     },
 
+    async changeAvatar() {
+        const url = prompt('📸 Pega la URL de tu nueva foto de perfil:\n\n(La imagen debe estar alojada en internet)');
+        if (!url) return;
+        
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            this.showNotification('URL inválida', 'error');
+            return;
+        }
+        
+        try {
+            await Database.updateUserProfile(this.currentUser.uid, { photoURL: url });
+            
+            if (this.currentUser.updateProfile) {
+                await this.currentUser.updateProfile({ photoURL: url });
+            }
+            
+            this.showNotification('Foto actualizada', 'success');
+            await this.loadUserProfile();
+            this.loadSettingsData();
+        } catch (error) {
+            this.showNotification('Error: ' + error.message, 'error');
+        }
+    },
+
+    async deleteAccount() {
+        const input = prompt(
+            '⚠️ ¿ELIMINAR tu cuenta para siempre?\n\n' +
+            '• Se borrarán TODOS tus archivos\n' +
+            '• Se eliminará tu perfil\n' +
+            '• NO se puede deshacer\n\n' +
+            'Escribe "ELIMINAR" para confirmar:'
+        );
+        
+        if (input !== 'ELIMINAR') {
+            this.showNotification('Eliminación cancelada', 'info');
+            return;
+        }
+        
+        try {
+            const files = await Database.getAllUserFiles(this.currentUser.uid);
+            for (const file of files) {
+                await StorageManager.deleteFilePermanently(this.currentUser.uid, file);
+            }
+            
+            await Database.getUserRef(this.currentUser.uid).remove();
+            await this.currentUser.delete();
+            
+            this.showNotification('Cuenta eliminada', 'success');
+            this.closeSettingsTab();
+            await Auth.signOut();
+        } catch (error) {
+            this.showNotification('Error: ' + error.message, 'error');
+        }
+    },
+
+    // ========== PLANES ==========
     showPlansModal() {
+        const allPlans = [
+            { category: '👤 Personal', plans: [PLANS.PERSONAL.GRATUITO, PLANS.PERSONAL.PLUS, PLANS.PERSONAL.PRO] },
+            { category: '🏢 Empresa', plans: [PLANS.EMPRESA.GRATUITO, PLANS.EMPRESA.BUSINESS_PRO, PLANS.EMPRESA.BUSINESS_INFINITY] }
+        ];
+        
+        let html = '';
+        
+        allPlans.forEach(group => {
+            html += `<h3 style="margin: 16px 0 12px; color: var(--text-secondary);">${group.category}</h3>`;
+            html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">';
+            
+            group.plans.forEach(plan => {
+                const price = plan.price?.formatted || 'Gratuito';
+                const badge = plan.badge ? `<span class="badge" style="background: ${plan.color}20; color: ${plan.color};">${plan.badge}</span>` : '';
+                const isCurrentPlan = this.currentUser?.plan === plan.id;
+                
+                html += `
+                    <div class="plan-card ${isCurrentPlan ? 'featured' : ''}" style="padding: 20px; border: 1px solid var(--glass-border); border-radius: var(--radius); text-align: center; position: relative;">
+                        ${badge ? `<div style="position: absolute; top: -8px; right: -8px;">${badge}</div>` : ''}
+                        <div style="font-size: 2rem; margin-bottom: 8px;">
+                            <i class="${plan.icon}" style="color: ${plan.color};"></i>
+                        </div>
+                        <h4 style="color: ${plan.color};">${plan.name}</h4>
+                        <p style="font-size: 1.4rem; font-weight: 700; margin: 8px 0;">${price}</p>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem;">${plan.storageFormatted}</p>
+                        <p style="color: var(--text-muted); font-size: 0.8rem;">${plan.ia?.name || ''}</p>
+                        <p style="color: var(--text-muted); font-size: 0.8rem;">${plan.ia?.credits || 0} créditos</p>
+                        <button class="btn ${isCurrentPlan ? 'btn-secondary' : 'btn-outline'} btn-sm mt-10" 
+                            ${isCurrentPlan ? 'disabled' : ''}
+                            onclick="UI.showNotification('Sistema de pagos próximamente', 'info')">
+                            ${isCurrentPlan ? '✓ Plan actual' : 'Mejorar'}
+                        </button>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+        });
+        
         this.showModal(`
             <h2><i class="fa-solid fa-crown"></i> Planes ShareIt</h2>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 20px;">
-                <div class="plan-card" style="padding: 20px; border: 1px solid var(--glass-border); border-radius: var(--radius); text-align: center;">
-                    <h3>Gratuito</h3>
-                    <p style="font-size: 2rem; font-weight: 700;">0€</p>
-                    <p>15 GB</p>
-                    <p>IA básica</p>
-                    <p>200 créditos</p>
-                    <button class="btn btn-outline btn-sm mt-10" disabled>Actual</button>
-                </div>
-                <div class="plan-card" style="padding: 20px; border: 1px solid var(--primary); border-radius: var(--radius); text-align: center;">
-                    <h3>Plus</h3>
-                    <p style="font-size: 2rem; font-weight: 700;">1,99€</p>
-                    <p>125 GB</p>
-                    <p>IA avanzada</p>
-                    <p>350 créditos/mes</p>
-                    <button class="btn btn-primary btn-sm mt-10" onclick="UI.showNotification('Pagos no disponibles aún', 'error')">Mejorar</button>
-                </div>
-                <div class="plan-card" style="padding: 20px; border: 1px solid var(--glass-border); border-radius: var(--radius); text-align: center;">
-                    <h3>Pro</h3>
-                    <p style="font-size: 2rem; font-weight: 700;">19,99€</p>
-                    <p>350 GB</p>
-                    <p>IA premium</p>
-                    <p>750 créditos/mes</p>
-                    <button class="btn btn-primary btn-sm mt-10" onclick="UI.showNotification('Pagos no disponibles aún', 'error')">Mejorar</button>
-                </div>
+            <div style="max-height: 60vh; overflow-y: auto; padding-right: 8px;">
+                ${html}
             </div>
+            <p class="text-muted mt-20" style="text-align: center; font-size: 0.8rem;">
+                * Precios con IVA incluido. Pagos próximamente disponibles.
+            </p>
         `);
     },
 
@@ -624,22 +977,30 @@ toggleUploadPanel() {
         const container = document.getElementById('notification-container');
         if (!container) return;
         
+        const icons = {
+            success: 'fa-circle-check',
+            error: 'fa-circle-exclamation',
+            warning: 'fa-triangle-exclamation',
+            info: 'fa-circle-info'
+        };
+        
         const notification = document.createElement('div');
         notification.className = `notification ${type} animate__animated animate__fadeInRight`;
         notification.innerHTML = `
-            <i class="fa-solid fa-${type === 'success' ? 'circle-check' : 'circle-exclamation'}"></i>
-            ${message}
+            <i class="fa-solid ${icons[type] || icons.info}"></i>
+            <span>${message}</span>
         `;
         
         container.appendChild(notification);
         
+        // Auto-eliminar
         setTimeout(() => {
             notification.style.animation = 'fadeOutRight 0.3s ease forwards';
             setTimeout(() => notification.remove(), 300);
         }, 4000);
     },
 
-    // ========== UTILIDADES UI ==========
+    // ========== UTILIDADES ==========
     showLoading(show) {
         const loader = document.getElementById('loading-screen');
         if (loader) loader.style.display = show ? 'flex' : 'none';
@@ -647,13 +1008,24 @@ toggleUploadPanel() {
 
     showContentLoader(show) {
         const loader = document.getElementById('content-loader');
+        const fileList = document.getElementById('file-list');
+        const emptyState = document.getElementById('empty-state');
+        
         if (loader) loader.style.display = show ? 'block' : 'none';
+        if (show) {
+            if (fileList) fileList.innerHTML = '';
+            if (emptyState) emptyState.style.display = 'none';
+        }
     },
 
     showEmailAuthForm() {
         const section = document.getElementById('email-auth-section');
         if (section) {
-            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+            const isVisible = section.style.display !== 'none';
+            section.style.display = isVisible ? 'none' : 'block';
+            if (!isVisible) {
+                document.getElementById('auth-email')?.focus();
+            }
         }
     },
 
@@ -670,33 +1042,9 @@ toggleUploadPanel() {
         if (panel) {
             const isVisible = panel.style.display !== 'none';
             panel.style.display = isVisible ? 'none' : 'flex';
-            
             if (!isVisible) {
-                document.getElementById('ia-input')?.focus();
+                setTimeout(() => document.getElementById('ia-input')?.focus(), 100);
             }
-        }
-    },
-
-    toggleFileSelection(fileId, cardElement) {
-        if (this.selectedFiles.has(fileId)) {
-            this.selectedFiles.delete(fileId);
-            cardElement?.classList.remove('selected');
-        } else {
-            this.selectedFiles.add(fileId);
-            cardElement?.classList.add('selected');
-        }
-        this.updateToolbar();
-    },
-
-    updateToolbar() {
-        const toolbar = document.getElementById('toolbar');
-        const count = document.getElementById('selected-count');
-        
-        if (this.selectedFiles.size > 0) {
-            if (toolbar) toolbar.style.display = 'flex';
-            if (count) count.textContent = `${this.selectedFiles.size} seleccionado(s)`;
-        } else {
-            if (toolbar) toolbar.style.display = 'none';
         }
     },
 
@@ -707,58 +1055,103 @@ toggleUploadPanel() {
         if (sharedId) {
             const file = await ShareManager.getSharedFile(sharedId);
             if (file) {
-                this.showNotification('Archivo compartido cargado', 'success');
+                this.showNotification('Archivo compartido cargado', 'info');
                 this.previewFile(file.id);
             }
         }
     },
 
     showContextMenu(x, y, file) {
-        // Implementación básica de menú contextual
         const existing = document.querySelector('.context-menu');
         if (existing) existing.remove();
         
         const menu = document.createElement('div');
         menu.className = 'context-menu glass';
-        menu.style.cssText = `
-            position: fixed;
-            left: ${x}px;
-            top: ${y}px;
-            z-index: 5000;
-            padding: 8px;
-            min-width: 180px;
-            border-radius: var(--radius);
-        `;
+        menu.style.cssText = `position: fixed; left: ${Math.min(x, window.innerWidth - 220)}px; top: ${Math.min(y, window.innerHeight - 300)}px;`;
+        
+        const isTrash = this.currentView === 'trash';
         
         menu.innerHTML = `
-            <button class="nav-btn" onclick="UI.previewFile('${file.id}'); document.querySelector('.context-menu').remove();">
-                <i class="fa-solid fa-eye"></i> Abrir
-            </button>
-            <button class="nav-btn" onclick="UI.shareFileDialog('${file.id}'); document.querySelector('.context-menu').remove();">
-                <i class="fa-solid fa-share"></i> Compartir
-            </button>
-            <button class="nav-btn" onclick="UI.toggleStar('${file.id}'); document.querySelector('.context-menu').remove();">
-                <i class="fa-solid fa-star"></i> Destacar
-            </button>
-            <button class="nav-btn" onclick="StorageManager.downloadFile(${JSON.stringify(file)}); document.querySelector('.context-menu').remove();">
-                <i class="fa-solid fa-download"></i> Descargar
-            </button>
-            <hr style="border-color: var(--glass-border); margin: 4px 0;">
-            <button class="nav-btn" style="color: var(--danger);" onclick="UI.moveToTrash('${file.id}'); document.querySelector('.context-menu').remove();">
-                <i class="fa-solid fa-trash"></i> Eliminar
-            </button>
+            ${!isTrash ? `
+                <button class="nav-btn" onclick="UI.previewFile('${file.id}'); this.closest('.context-menu').remove();">
+                    <i class="fa-solid fa-eye"></i> Vista previa
+                </button>
+                <button class="nav-btn" onclick="UI.shareFileDialog('${file.id}'); this.closest('.context-menu').remove();">
+                    <i class="fa-solid fa-share"></i> Compartir
+                </button>
+                <button class="nav-btn" onclick="UI.toggleStar('${file.id}'); this.closest('.context-menu').remove();">
+                    <i class="fa-solid fa-star"></i> ${file.starred ? 'Quitar destacado' : 'Destacar'}
+                </button>
+                ${file.type !== 'folder' ? `
+                    <button class="nav-btn" onclick="StorageManager.downloadFile(UI.filesCache.find(f => f.id === '${file.id}')); this.closest('.context-menu').remove();">
+                        <i class="fa-solid fa-download"></i> Descargar
+                    </button>
+                ` : ''}
+                <hr>
+                <button class="nav-btn" style="color: var(--danger);" onclick="UI.moveToTrash('${file.id}'); this.closest('.context-menu').remove();">
+                    <i class="fa-solid fa-trash-can"></i> Mover a papelera
+                </button>
+            ` : `
+                <button class="nav-btn" onclick="UI.restoreFromTrash('${file.id}'); this.closest('.context-menu').remove();">
+                    <i class="fa-solid fa-rotate-left"></i> Restaurar
+                </button>
+                <hr>
+                <button class="nav-btn" style="color: var(--danger);" onclick="UI.deletePermanently('${file.id}'); this.closest('.context-menu').remove();">
+                    <i class="fa-solid fa-delete-left"></i> Eliminar para siempre
+                </button>
+            `}
         `;
         
         document.body.appendChild(menu);
         
-        // Cerrar al hacer click fuera
         setTimeout(() => {
-            document.addEventListener('click', function closeMenu() {
-                document.querySelector('.context-menu')?.remove();
-                document.removeEventListener('click', closeMenu);
-            });
+            const closeMenu = (e) => {
+                if (!menu.contains(e.target)) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                }
+            };
+            document.addEventListener('click', closeMenu);
         }, 100);
+    },
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    },
+
+    escapeAttr(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 };
 
-console.log('🎨 UI cargada completamente');
+// Cerrar modal al hacer clic fuera
+document.addEventListener('click', (e) => {
+    const overlay = document.getElementById('modal-overlay');
+    if (overlay && e.target === overlay) {
+        UI.closeModal();
+    }
+    
+    const previewOverlay = document.getElementById('file-preview-overlay');
+    if (previewOverlay && e.target === previewOverlay) {
+        UI.closeFilePreview();
+    }
+});
+
+// Atajos de teclado
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    
+    if (e.key === 'Escape') {
+        UI.closeModal();
+        UI.closeFilePreview();
+    }
+});
+
+console.log('🎨 UI completamente cargada y funcional');
