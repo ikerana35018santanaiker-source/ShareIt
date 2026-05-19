@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ShareIt — Nube Inteligente con IA</title>
+    <title>ShareIt — Nube Inteligente</title>
     
-    <!-- Font Awesome 6.4.0 -->
+    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- Google Fonts -->
@@ -22,21 +22,108 @@
     <!-- Puter.js SDK -->
     <script src="https://js.puter.com/v2/puter.js"></script>
     
-    <!-- Estilos propios -->
+    <style>
+        /* Estilos críticos inline para evitar pantalla negra */
+        :root {
+            --bg: #0A0A14;
+            --text: #FFFFFF;
+            --primary: #6C5CE7;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+            background: #0A0A14;
+            color: #FFFFFF;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+        
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0A0A14;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        
+        .loader-content {
+            text-align: center;
+            color: white;
+        }
+        
+        .loader-content i {
+            color: #6C5CE7;
+            font-size: 3rem;
+            animation: pulse 2s infinite;
+        }
+        
+        .loader-content h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-top: 20px;
+            background: linear-gradient(135deg, #6C5CE7, #00CECE);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .loader-content p {
+            color: #A0A0B8;
+            margin-top: 8px;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.05); }
+        }
+        
+        #auth-container {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0A0A14;
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #app-container {
+            display: none;
+            width: 100%;
+            height: 100vh;
+            background: #0A0A14;
+        }
+    </style>
+    
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <!-- ========== PANTALLA DE CARGA ========== -->
-    <div id="loading-screen" class="fullscreen-center">
+    <div id="loading-screen">
         <div class="loader-content">
-            <i class="fa-solid fa-cloud-arrow-up fa-3x pulse-animation" style="color: #6C5CE7;"></i>
-            <h1 class="gradient-text mt-20">ShareIt</h1>
-            <p class="text-secondary">Cargando tu espacio...</p>
+            <i class="fa-solid fa-cloud-arrow-up fa-3x"></i>
+            <h1>ShareIt</h1>
+            <p>Cargando tu espacio...</p>
         </div>
     </div>
 
-    <!-- ========== CONTENEDOR DE AUTENTICACIÓN ========== -->
-    <div id="auth-container" class="fullscreen-center" style="display: none;">
+    <!-- ========== AUTENTICACIÓN ========== -->
+    <div id="auth-container">
         <div class="auth-card glass animate__animated animate__fadeInUp">
             <div class="auth-header">
                 <i class="fa-solid fa-cloud fa-3x mb-20" style="color: #6C5CE7;"></i>
@@ -45,17 +132,14 @@
             </div>
             
             <div class="auth-buttons">
-                <button id="btn-google" class="btn btn-google" onclick="Auth.signInWithGoogle()">
+                <button class="btn btn-google" onclick="Auth.signInWithGoogle()">
                     <i class="fa-brands fa-google"></i> Continuar con Google
                 </button>
-                
                 <div class="separator"><span>o continúa con</span></div>
-                
-                <button id="btn-email-form" class="btn btn-outline" onclick="UI.showEmailAuthForm()">
+                <button class="btn btn-outline" onclick="UI.showEmailAuthForm()">
                     <i class="fa-solid fa-envelope"></i> Correo electrónico
                 </button>
-                
-                <button id="btn-anonymous" class="btn btn-text" onclick="Auth.signInAnonymously()">
+                <button class="btn btn-text" onclick="Auth.signInAnonymously()">
                     <i class="fa-solid fa-ghost"></i> Acceso anónimo (solo lectura)
                 </button>
             </div>
@@ -82,13 +166,12 @@
                     <a href="#" onclick="Auth.sendSignInLinkToEmail()">Acceder con link mágico</a>
                 </div>
             </div>
-            
             <p id="auth-error" class="error-message mt-10" style="display: none;"></p>
         </div>
     </div>
 
     <!-- ========== APLICACIÓN PRINCIPAL ========== -->
-    <div id="app-container" style="display: none;">
+    <div id="app-container">
         <!-- Sidebar -->
         <aside id="sidebar" class="glass">
             <div class="sidebar-header">
@@ -96,9 +179,6 @@
                     <i class="fa-solid fa-cloud"></i>
                     <span class="gradient-text logo-text">ShareIt</span>
                 </div>
-                <button id="sidebar-toggle" class="btn-icon" onclick="UI.toggleSidebar()">
-                    <i class="fa-solid fa-bars"></i>
-                </button>
             </div>
             
             <div class="user-profile" onclick="UI.showSettingsTab()" style="cursor: pointer;">
@@ -114,7 +194,7 @@
                     <i class="fa-solid fa-hard-drive"></i> Mi unidad
                 </button>
                 <button class="nav-btn" data-view="shared" onclick="UI.navigateTo('shared')">
-                    <i class="fa-solid fa-share-nodes"></i> Compartidos conmigo
+                    <i class="fa-solid fa-share-nodes"></i> Compartidos
                 </button>
                 <button class="nav-btn" data-view="recent" onclick="UI.navigateTo('recent')">
                     <i class="fa-solid fa-clock-rotate-left"></i> Recientes
@@ -148,7 +228,7 @@
             </div>
         </aside>
         
-        <!-- Panel de Ajustes (se abre sobre el sidebar) -->
+        <!-- Panel de Ajustes -->
         <div id="settings-panel" class="glass" style="display: none;">
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> Ajustes</h3>
@@ -198,7 +278,6 @@
             <header id="main-header">
                 <div class="header-left">
                     <h2 id="current-view-title">Mi unidad</h2>
-                    <div class="breadcrumb" id="breadcrumb"></div>
                 </div>
                 <div class="header-actions">
                     <div class="search-bar">
@@ -219,8 +298,8 @@
                 <button class="btn-icon" onclick="UI.downloadSelected()"><i class="fa-solid fa-download"></i></button>
                 <button class="btn-icon" onclick="UI.shareSelected()"><i class="fa-solid fa-share"></i></button>
                 <button class="btn-icon" onclick="UI.moveToTrashSelected()"><i class="fa-solid fa-trash"></i></button>
-                <button class="btn-icon" onclick="UI.restoreSelected()" id="restore-btn" style="display: none;"><i class="fa-solid fa-rotate-left"></i> Restaurar</button>
-                <button class="btn-icon" onclick="UI.deletePermanentlySelected()" id="delete-forever-btn" style="display: none;"><i class="fa-solid fa-delete-left"></i> Eliminar para siempre</button>
+                <button class="btn-icon" id="restore-btn" style="display: none;" onclick="UI.restoreSelected()"><i class="fa-solid fa-rotate-left"></i> Restaurar</button>
+                <button class="btn-icon" id="delete-forever-btn" style="display: none;" onclick="UI.deletePermanentlySelected()"><i class="fa-solid fa-delete-left"></i> Eliminar</button>
                 <span id="selected-count" class="text-secondary ml-10"></span>
             </div>
             
@@ -234,12 +313,12 @@
             
             <div id="content-loader" class="content-loader" style="display: none;">
                 <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
-                <p class="text-secondary">Cargando archivos...</p>
+                <p class="text-secondary mt-10">Cargando archivos...</p>
             </div>
         </main>
     </div>
 
-    <!-- ========== PANEL DE CHAT IA ========== -->
+    <!-- Panel de Chat IA -->
     <div id="ia-panel" class="glass" style="display: none;">
         <div class="ia-header">
             <div class="ia-header-left">
@@ -256,22 +335,22 @@
         <div id="ia-messages" class="ia-messages">
             <div class="ia-welcome">
                 <i class="fa-solid fa-robot fa-2x mb-10" style="color: #6C5CE7;"></i>
-                <p>¡Hola! Soy tu asistente IA. Puedo ayudarte con tus archivos y mucho más.</p>
+                <p>¡Hola! Soy tu asistente IA.</p>
             </div>
         </div>
         <div class="ia-input-container">
-            <textarea id="ia-input" class="ia-input" placeholder="Escribe tu mensaje..." rows="1" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); ChatIA.sendMessage();}"></textarea>
+            <textarea id="ia-input" class="ia-input" placeholder="Escribe tu mensaje..." rows="1"></textarea>
             <button class="btn btn-primary btn-sm" onclick="ChatIA.sendMessage()">
                 <i class="fa-solid fa-paper-plane"></i>
             </button>
         </div>
     </div>
     
-    <button id="fab-ia" class="fab" onclick="UI.toggleIAPanel()" title="Abrir Chat IA">
+    <button id="fab-ia" class="fab" onclick="UI.toggleIAPanel()">
         <i class="fa-solid fa-robot"></i>
     </button>
 
-    <!-- ========== PANEL DE SUBIDAS (estilo Google Drive) ========== -->
+    <!-- Panel de Subidas -->
     <div id="upload-panel" class="upload-panel glass" style="display: none;">
         <div class="upload-panel-header">
             <h4><i class="fa-solid fa-upload"></i> Subiendo archivos</h4>
@@ -282,15 +361,12 @@
         <div id="upload-list" class="upload-list"></div>
     </div>
 
-    <!-- ========== MODALES ========== -->
+    <!-- Modal -->
     <div id="modal-overlay" class="modal-overlay" style="display: none;" onclick="UI.closeModal()">
         <div id="modal-content" class="modal-content glass" onclick="event.stopPropagation()"></div>
     </div>
 
-    <!-- ========== NOTIFICACIONES ========== -->
-    <div id="notification-container" class="notification-container"></div>
-
-    <!-- ========== PREVIEW DE ARCHIVOS ========== -->
+    <!-- Preview de archivos -->
     <div id="file-preview-overlay" class="modal-overlay" style="display: none;" onclick="UI.closeFilePreview()">
         <div id="file-preview-content" class="file-preview-content glass" onclick="event.stopPropagation()">
             <div class="file-preview-header">
@@ -304,6 +380,10 @@
         </div>
     </div>
 
+    <!-- Notificaciones -->
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Scripts en orden -->
     <script src="js/utils.js"></script>
     <script src="js/plans.js"></script>
     <script src="js/firebase-config.js"></script>
