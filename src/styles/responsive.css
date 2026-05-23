@@ -1,0 +1,84 @@
+/* ═══════════════════════════════════════════════════
+   TASKFLOW — Responsive
+   ═══════════════════════════════════════════════════ */
+
+/* ─── TABLET ─── */
+@media (max-width: 900px) {
+  .modal-body-grid {
+    grid-template-columns: 1fr;
+  }
+  .task-sidebar-detail {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px 24px;
+  }
+  .header-center { display: none; }
+  .priority-filter-wrap { display: none; }
+}
+
+/* ─── MOBILE ─── */
+@media (max-width: 768px) {
+  /* Sidebar becomes overlay */
+  .sidebar {
+    transform: translateX(-100%);
+    z-index: var(--z-sidebar);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar-close { display: flex; }
+  .sidebar-overlay.open { display: block; }
+
+  /* Main has no margin */
+  .main-content { margin-left: 0; }
+
+  /* Hamburger visible */
+  .hamburger { display: flex; }
+
+  /* Header adjustments */
+  .app-header { padding: 0 16px; gap: 8px; }
+  .header-right { gap: 8px; }
+  .priority-filter-wrap { display: none; }
+
+  /* Page padding */
+  .page-container { padding: 20px 16px; }
+
+  /* Board canvas scrolls */
+  .board-canvas { gap: 12px; }
+  .column { width: 260px; min-width: 260px; }
+
+  /* Boards grid */
+  .boards-grid { grid-template-columns: 1fr; }
+
+  /* Auth */
+  .auth-card { padding: 28px 24px; }
+
+  /* Modals */
+  .modal { border-radius: var(--radius-lg); max-height: 95vh; }
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal-large { max-width: 100%; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .modal-body-grid { grid-template-columns: 1fr; gap: 16px; }
+  .task-sidebar-detail { display: flex; flex-direction: column; }
+
+  /* Board header */
+  .board-header { flex-direction: column; align-items: flex-start; }
+  .board-header-actions { display: flex; gap: 8px; }
+  .board-title { font-size: 18px; }
+
+  /* Toast */
+  .toast-container { bottom: 16px; right: 16px; left: 16px; }
+  .toast { min-width: 0; max-width: 100%; }
+
+  /* Search */
+  .search-bar { display: none; }
+  #global-search { display: none; }
+}
+
+@media (max-width: 480px) {
+  .auth-card { padding: 24px 20px; }
+  .page-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+  .page-title { font-size: 20px; }
+  .board-header-actions .btn-ghost { padding: 8px 10px; font-size: 13px; }
+  .column { width: 240px; min-width: 240px; }
+}
